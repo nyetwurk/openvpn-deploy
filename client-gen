@@ -1,0 +1,43 @@
+#/bin/bash
+
+set -e
+
+CLIENT=$1
+[ -z "$CLIENT"] && CLIENT=client
+
+if [ ! -r easy-rsa/pki/issued/${CLIENT}.crt ]; then
+(
+cd easy-rsa
+./easyrsa build-client-full $CLIENT nopass
+)
+fi
+
+server=vpn.curtisfong.org
+port=$(grep ^port server.conf | cut -f 2 -d " ")
+proto=$(grep ^proto server.conf | cut -f 2 -d " ")
+cipher=$(grep ^cipher server.conf | cut -f 2 -d " ")
+
+[ -z "$proto"] && proto=udp
+[ -z "$port"] && port=1194
+
+echo "got $port $proto $cipher" >&2
+(
+#cat /usr/share/doc/openvpn/examples/sample-config-files/client.conf
+sed "s/_PORT_/$port/;s/_PROTO_/$proto/;s/_CIPHER_/$cipher/;s/_SERVER_/$server/" client.ovpn
+
+echo "<ca>"
+sed -n '/BEGIN CERTIFICATE/,/END CERTIFICATE/p' < easy-rsa/pki/ca.crt
+echo "</ca>"
+
+echo "<cert>"
+sed -n '/BEGIN CERTIFICATE/,/END CERTIFICATE/p' < easy-rsa/pki/issued/$CLIENT.crt
+echo "</cert>"
+
+echo "<key>"
+sed -n '/BEGIN PRIVATE KEY/,/END PRIVATE KEY/p' < easy-rsa/pki/private/$CLIENT.key
+echo "</key>"
+
+echo "<tls-auth>"
+sed -n '/BEGIN OpenVPN Static key V1/,/END OpenVPN Static key V1/p' < server/ta.key
+echo "</tls-auth>"
+) > client/$CLIENT.ovpn

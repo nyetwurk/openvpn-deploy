@@ -1,0 +1,6 @@
+plans/
+.cursor/
+.*.swp
+.*.swo
+*~
+*.bak

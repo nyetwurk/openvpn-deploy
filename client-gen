@@ -2,17 +2,20 @@
 
 set -e
 
-CLIENT=${1:-client}
+CLIENT=${1:-$(id -un)}
+CONF=${2:-server-udp.conf}
+OUT=${3:-client/${CLIENT}.ovpn}
 server=${SERVER_CN:-vpn.internal.curtisfong.org}
 
-port=$(grep ^port server-udp.conf | cut -f 2 -d " " || true)
-proto=$(grep ^proto server-udp.conf | cut -f 2 -d " " || true)
-cipher=$(grep ^cipher server-udp.conf | cut -f 2 -d " " || true)
+port=$(grep ^port "$CONF" | cut -f 2 -d " " || true)
+proto=$(grep ^proto "$CONF" | cut -f 2 -d " " || true)
+cipher=$(grep ^cipher "$CONF" | cut -f 2 -d " " || true)
 
 [ -z "$proto" ] && proto=udp
 [ -z "$port" ] && port=1194
 
-echo "got $port $proto $cipher" >&2
+echo "got $CONF $port $proto $cipher -> $OUT" >&2
+mkdir -p "$(dirname "$OUT")"
 (
 sed "s/_PORT_/$port/;s/_PROTO_/$proto/;s/_CIPHER_/$cipher/;s/_SERVER_/$server/" client.ovpn
 
@@ -31,4 +34,4 @@ echo "</key>"
 echo "<tls-auth>"
 sed -n '/BEGIN OpenVPN Static key V1/,/END OpenVPN Static key V1/p' < server/ta.key
 echo "</tls-auth>"
-) > client/$CLIENT.ovpn
+) > "$OUT"

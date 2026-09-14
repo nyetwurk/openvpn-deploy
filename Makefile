@@ -1,7 +1,8 @@
 SHELL := /bin/bash
 DEST ?= /etc/openvpn/server
 SERVER_CN ?= vpn.internal.curtisfong.org
-CLIENTS ?= client
+# login that owns the process (SUDO_USER if uid 0)
+CLIENTS ?= $(shell test "$$(id -u)" -eq 0 && printf '%s\n' "$${SUDO_USER:-$$(id -un)}" || id -un)
 OPENVPN ?= /usr/sbin/openvpn
 EASYRSA := ./easyrsa
 
@@ -21,7 +22,9 @@ SERVER_CRT := $(PKI)/issued/$(SERVER_CN).crt
 SERVER_KEY := $(PKI)/private/$(SERVER_CN).key
 DH_PEM := $(PKI)/dh.pem
 TA_KEY := server/ta.key
-CLIENT_OVPNS := $(addprefix client/,$(addsuffix .ovpn,$(CLIENTS)))
+CLIENT_OVPNS := \
+	$(addprefix client/,$(addsuffix .ovpn,$(CLIENTS))) \
+	$(addprefix client/,$(addsuffix .tcp.ovpn,$(CLIENTS)))
 
 NEED_USER := test "$$(id -u)" -ne 0 || { echo "generate PKI as non-root; run make, then sudo make deploy"; exit 1; }
 
@@ -66,7 +69,12 @@ $(PKI)/issued/%.crt $(PKI)/private/%.key &: $(CA_CRT)
 client/%.ovpn: Makefile client-gen $(PKI)/issued/%.crt $(PKI)/private/%.key $(CA_CRT) $(TA_KEY) \
 		client.ovpn server-udp.conf
 	mkdir -p $(dir $@)
-	./client-gen "$*"
+	./client-gen "$*" server-udp.conf $@
+
+client/%.tcp.ovpn: Makefile client-gen $(PKI)/issued/%.crt $(PKI)/private/%.key $(CA_CRT) $(TA_KEY) \
+		client.ovpn server-tcp.conf
+	mkdir -p $(dir $@)
+	./client-gen "$*" server-tcp.conf $@
 
 dryrun:
 	@for f in $(CONFS); do echo "=== $$f ==="; \

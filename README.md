@@ -15,7 +15,8 @@ Firewall policy for `tun0` / `tun1` is the sibling nftables tree
   `1194`, `tun0`, pool `10.8.19.0/24`. Day-to-day profile
 - `server-tcp.conf` — live TCP unit `openvpn-server@server-tcp`. Port
   `443`, `tun1`, pool `10.8.20.0/24`. Hotel/guest-wifi fallback.
-  Nothing else may bind `443`
+  `port-share 127.0.0.1 8443` sends non-OpenVPN TCP (HTTPS) to Apache.
+  Apache must not `Listen 443`.
 - `server.conf` — Debian sample. Not a unit; not installed
 - `client.ovpn` — client template (`dev tun`, `block-ipv6`, `mssfix
   1360`). Placeholders `_SERVER_` `_PORT_` `_PROTO_` `_CIPHER_`

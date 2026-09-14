@@ -7,9 +7,9 @@ CONF=${2:-server-udp.conf}
 OUT=${3:-client/${CLIENT}.ovpn}
 server=${SERVER_CN:-vpn.internal.curtisfong.org}
 
-port=$(grep ^port "$CONF" | cut -f 2 -d " " || true)
-proto=$(grep ^proto "$CONF" | cut -f 2 -d " " || true)
-cipher=$(grep ^cipher "$CONF" | cut -f 2 -d " " || true)
+port=$(grep "^port " "$CONF" | cut -f 2 -d " " || true)
+proto=$(grep "^proto " "$CONF" | cut -f 2 -d " " || true)
+cipher=$(grep "^cipher " "$CONF" | cut -f 2 -d " " || true)
 
 [ -z "$proto" ] && proto=udp
 [ -z "$port" ] && port=1194

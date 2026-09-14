@@ -1,28 +1,19 @@
-#/bin/bash
+#!/bin/bash
 
 set -e
 
-CLIENT=$1
-[ -z "$CLIENT"] && CLIENT=client
+CLIENT=${1:-client}
+server=${SERVER_CN:-vpn.internal.curtisfong.org}
 
-if [ ! -r easy-rsa/pki/issued/${CLIENT}.crt ]; then
-(
-cd easy-rsa
-./easyrsa build-client-full $CLIENT nopass
-)
-fi
+port=$(grep ^port server-udp.conf | cut -f 2 -d " " || true)
+proto=$(grep ^proto server-udp.conf | cut -f 2 -d " " || true)
+cipher=$(grep ^cipher server-udp.conf | cut -f 2 -d " " || true)
 
-server=vpn.curtisfong.org
-port=$(grep ^port server.conf | cut -f 2 -d " ")
-proto=$(grep ^proto server.conf | cut -f 2 -d " ")
-cipher=$(grep ^cipher server.conf | cut -f 2 -d " ")
-
-[ -z "$proto"] && proto=udp
-[ -z "$port"] && port=1194
+[ -z "$proto" ] && proto=udp
+[ -z "$port" ] && port=1194
 
 echo "got $port $proto $cipher" >&2
 (
-#cat /usr/share/doc/openvpn/examples/sample-config-files/client.conf
 sed "s/_PORT_/$port/;s/_PROTO_/$proto/;s/_CIPHER_/$cipher/;s/_SERVER_/$server/" client.ovpn
 
 echo "<ca>"

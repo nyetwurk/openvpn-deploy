@@ -4,3 +4,6 @@ plans/
 .*.swo
 *~
 *.bak
+easy-rsa/pki/
+server/ta.key
+client/*.ovpn

@@ -26,9 +26,6 @@ Firewall policy for `tun0` / `tun1` is the sibling nftables tree
 - `easy-rsa/` — Easy-RSA 3. PKI is `easy-rsa/pki/` (gitignored)
 - `server/ta.key` — tls-auth key (gitignored)
 - `Makefile` — PKI, client profiles, `dryrun`, `install-pki`, `deploy`
-- `logrotate.d/openvpn` — `/var/log/openvpn/*.log` (`copytruncate`,
-  `create 0640 root adm`). `ipp` files are not `.log`. Installed to
-  `/etc/logrotate.d/openvpn`
 
 Cert paths in the live confs are relative to `/etc/openvpn/server`:
 
@@ -42,9 +39,20 @@ Both servers push `redirect-gateway def1 bypass-dhcp`, LAN route
 `192.168.19.0/24`, and DNS `192.168.19.1`. Cipher is `AES-256-CBC`.
 UDP has `explicit-exit-notify`. Both have `mssfix 1360`. Do not use
 `fragment` (OpenVPN Connect on Android trips `FRAG_IN` on the server).
-Logs and `ifconfig-pool-persist` are under `/var/log/openvpn/`
-(unsuffixed for UDP, `-tcp` for TCP). OpenVPN creates those files
-`0600` root; there is no `--log-mode`.
+No `log` / `log-append` and no `verb` (OpenVPN default is 1). The
+units stay in the foreground; journald takes stdout
+(`journalctl -u openvpn-server@server-udp` /
+`openvpn-server@server-tcp`). The stock unit already passes
+`--suppress-timestamps` and `--status
+/run/openvpn-server/status-%i.log` (`--status-version 2`). Do not set
+`status` in the confs (that overrides the unit path). `/run` is tmpfs;
+status is live-only (`0710` root; `sudo cat` to read).
+`ifconfig-pool-persist` is `/var/log/openvpn/ipp.txt` (UDP) and
+`ipp-tcp.txt` (TCP). Persist across reboot; not a log. Pre-create
+those files writable after `user nobody` or OpenVPN will not create
+them. Do not use the legacy `openvpn@` template
+(`/etc/openvpn/%i.conf`). TCP `port-share` still logs non-OpenVPN
+accepts at verb 1; that is expected, not a VPN client.
 
 The client remote is `vpn.internal.curtisfong.org`. UDP profiles use
 port `1194`; TCP profiles use `443`. `verify-x509-name` uses that CN.
@@ -72,14 +80,13 @@ traffic through the tun.
 - `make client/name.ovpn` — UDP profile from `server-udp.conf`
 - `make client/name.tcp.ovpn` — same cert, TCP `443` from
   `server-tcp.conf`
-- `make dryrun` — `diff -u` live confs against `DEST` and
-  `logrotate.d/openvpn` against `/etc/logrotate.d/openvpn`
+- `make dryrun` — `diff -u` live confs against `DEST`
 - `sudo make install-pki` — copy `ca.crt`, server cert/key, `dh.pem`,
   and `ta.key` to `DEST`. Does not copy the CA private key. Does not
   generate; fails if `make pki` has not been run
-- `sudo make deploy` — `install-pki`, install the two live confs and
-  logrotate, `daemon-reload`, `try-restart` the two units. Does not
-  install `server.conf`. Does not enable units
+- `sudo make deploy` — `install-pki`, install the two live confs,
+  `daemon-reload`, `try-restart` the two units. Does not install
+  `server.conf`. Does not enable units
 
 Generate PKI as a normal user, then `sudo make deploy`. Enable units
 on the host (`systemctl enable --now openvpn-server@server-udp

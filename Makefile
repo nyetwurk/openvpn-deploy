@@ -11,8 +11,6 @@ export SERVER_CN
 # server.conf is the Debian sample (not a unit). Live: server-udp / server-tcp.
 CONFS := server-udp.conf server-tcp.conf
 UNITS := openvpn-server@server-udp openvpn-server@server-tcp
-LOGROTATE := logrotate.d/openvpn
-LOGROTATE_DEST ?= /etc/logrotate.d/openvpn
 
 PKI := easy-rsa/pki
 SERIAL := $(PKI)/serial
@@ -80,7 +78,6 @@ dryrun:
 	@for f in $(CONFS); do echo "=== $$f ==="; \
 		diff -u "$(DEST)/$$f" "$$f" || true; \
 	done
-	@echo "=== $(LOGROTATE) ==="; diff -u "$(LOGROTATE_DEST)" "$(LOGROTATE)" || true
 
 # PKI files are sources to copy, not Make deps (sudo must not generate them).
 install-pki:
@@ -99,6 +96,5 @@ deploy: install-pki
 	@test "$$(id -u)" -eq 0 || { echo "need root: sudo make deploy"; exit 1; }
 	install -d -m 755 "$(DEST)"
 	install -m 644 $(CONFS) "$(DEST)/"
-	install -m 644 "$(LOGROTATE)" "$(LOGROTATE_DEST)"
 	systemctl daemon-reload
 	systemctl try-restart $(UNITS)

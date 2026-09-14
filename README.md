@@ -22,6 +22,9 @@ Firewall policy for `tun0` / `tun1` is the sibling nftables tree
 - `easy-rsa/` — Easy-RSA 3. PKI is `easy-rsa/pki/` (gitignored)
 - `server/ta.key` — tls-auth key (gitignored)
 - `Makefile` — PKI, client profiles, `dryrun`, `install-pki`, `deploy`
+- `logrotate.d/openvpn` — rotate `/var/log/openvpn/*.log`
+  (`copytruncate`). `ipp` files are not `.log`. Installed to
+  `/etc/logrotate.d/openvpn`
 
 Cert paths in the live confs are relative to `/etc/openvpn/server`:
 
@@ -52,14 +55,14 @@ The client remote is `vpn.internal.curtisfong.org` (UDP `1194` from
   and `client/`. Then `make pki` in a second invocation
 - `make clients` / `make client/name.ovpn` — client cert if missing,
   then `client-gen`
-- `make dryrun` — `diff -u` live `server-udp.conf` / `server-tcp.conf`
-  against `DEST`
+- `make dryrun` — `diff -u` live confs against `DEST` and
+  `logrotate.d/openvpn` against `/etc/logrotate.d/openvpn`
 - `sudo make install-pki` — copy `ca.crt`, server cert/key, `dh.pem`,
   and `ta.key` to `DEST`. Does not copy the CA private key. Does not
   generate; fails if `make pki` has not been run
-- `sudo make deploy` — `install-pki`, install the two live confs,
-  `daemon-reload`, `try-restart` the two units. Does not install
-  `server.conf`. Does not enable units
+- `sudo make deploy` — `install-pki`, install the two live confs and
+  logrotate, `daemon-reload`, `try-restart` the two units. Does not
+  install `server.conf`. Does not enable units
 
 Generate PKI as a normal user, then `sudo make deploy`.
 

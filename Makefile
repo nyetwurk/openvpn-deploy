@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-# Site settings: cp config-example.mk config.mk
+# Site settings: cp examples/config.mk config.mk
 
 -include config.mk
 

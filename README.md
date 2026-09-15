@@ -6,9 +6,15 @@ Source of truth for the TUN servers on this NAT router. Edit here.
 `ProtectHome=true`). Units: `openvpn-server@server-udp` and
 `openvpn-server@server-tcp` when those listeners are enabled.
 
-Firewall policy for the TUN devices is the sibling nftables tree
-(`../nftables`), not this repo. If you change `UDP_DEV` / `TCP_DEV` or
-the VPN pools, update nftables too.
+Firewall policy for the TUN devices on the NAT router is the sibling
+nftables tree (`../nftables`), not this repo. If you change `UDP_DEV` /
+`TCP_DEV` or the VPN pools, update that tree too.
+
+A WAN-only host (no LAN, no masquerade) should not use that tree. Copy
+`examples/50-openvpn.nft` into that host's `/etc/nftables.d/`. It owns
+`table ip openvpn` (does not use `ip filter` / `ip nat`). Set
+`net.ipv4.ip_forward=1`. `make deploy` does not install nft. If Debian
+`inet filter` forward policy is drop, accept the VPN traffic there too.
 
 ## Configuration
 
@@ -17,7 +23,7 @@ Makefile. Copy the example and uncomment only what you change, or
 write a short `config.mk` with just those lines:
 
 ```sh
-cp config-example.mk config.mk
+cp examples/config.mk config.mk
 ```
 
 `make` works without `config.mk`. `make VAR=...` still overrides.
@@ -52,9 +58,10 @@ unset or left over.
 
 ## Files
 
-- `config-example.mk` — commented override list (defaults are in the
-  Makefile). Copy to `config.mk` and uncomment what you change
-- `config.mk` — local overrides (gitignored)
+- `examples/config.mk` — commented override list (defaults are in the
+  Makefile). Copy to `config.mk` at the repo root and uncomment what
+  you change
+- `config.mk` — local overrides (gitignored as `/config.mk`)
 - `server.conf.in` — live unit template (UDP and TCP). Does not
   generate the Debian `server.conf` sample
 - `server-udp.conf` / `server-tcp.conf` — generated. UDP is the
@@ -77,6 +84,8 @@ unset or left over.
 - `server/ta.key` — tls-auth key (gitignored)
 - `Makefile` — PKI, client profiles, `confs`, `dryrun`, `install-pki`,
   `deploy`
+- `examples/50-openvpn.nft` — WAN-only host fragment. Copy to that
+  host's `/etc/nftables.d/`. Not installed. Do not use on the NAT router
 
 Cert paths in the live confs are relative to `/etc/openvpn/server`:
 
@@ -139,7 +148,7 @@ override.
   generate; fails if `make pki` has not been run
 - `sudo make deploy` — `install-pki`, install the enabled live confs,
   `daemon-reload`, `try-restart` those units. Does not install
-  `server.conf`. Does not enable units
+  `server.conf`. Does not enable units. Does not install nft.
 
 Generate PKI as a normal user, then `sudo make deploy`. Enable the UDP
 unit on the host (`systemctl enable --now openvpn-server@server-udp`).

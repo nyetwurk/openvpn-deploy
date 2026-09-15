@@ -129,12 +129,14 @@ client/%.ovpn: Makefile client-gen subst $(PKI)/issued/%.crt $(PKI)/private/%.ke
 	mkdir -p $(dir $@)
 	./client-gen "$(SERVER_CN)" "$*" server-udp.conf $@.tmp
 	mv $@.tmp $@
+	chmod 600 $@
 
 client/%.tcp.ovpn: Makefile client-gen subst $(PKI)/issued/%.crt $(PKI)/private/%.key $(CA_CRT) $(TA_KEY) \
 		client.ovpn.in server-tcp.conf $(wildcard config.mk)
 	mkdir -p $(dir $@)
 	./client-gen "$(SERVER_CN)" "$*" server-tcp.conf $@.tmp
 	mv $@.tmp $@
+	chmod 600 $@
 
 dryrun: $(CONFS)
 	@for f in $(CONFS); do echo "=== $$f ==="; \

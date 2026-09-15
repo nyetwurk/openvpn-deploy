@@ -117,7 +117,8 @@ accepts at verb 1; that is expected, not a VPN client.
 The client remote defaults to `SERVER_CN`
 (`example.com`). UDP profiles use `UDP_PORT` (`1194`);
 TCP profiles use `TCP_PORT` (`443`). `verify-x509-name` uses
-`SERVER_CN`. Import one `.ovpn` per device in OpenVPN Connect. Do not
+`SERVER_CN`. Profiles are mode `0600` (they inline the client private
+key). Import one `.ovpn` per device in OpenVPN Connect. Do not
 run UDP and TCP profiles at the same time. UDP is the daily transport;
 TCP is only when UDP is blocked.
 

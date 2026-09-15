@@ -26,6 +26,9 @@ mssfix=$(grep "^mssfix " "$CONF" | cut -f 2 -d " " || true)
 
 echo "got $CONF $port $proto $cipher -> $OUT" >&2
 mkdir -p "$(dirname "$OUT")"
+umask 077
+rm -f "$OUT"
+install -m 600 /dev/null "$OUT"
 (
 ./subst client.ovpn.in \
 	REMOTE="$remote" \

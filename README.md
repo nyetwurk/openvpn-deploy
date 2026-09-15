@@ -65,8 +65,8 @@ Changing `SERVER_CN` (or `REMOTE`, when `SERVER_CN` is unset) after
 `make pki` needs a new server cert. Disabling a listener does not stop
 a unit already enabled on the host.
 
-Live `server-udp.conf` and `server-tcp.conf` are generated from
-`server.conf.in` (`make confs`). Do not edit the generated files.
+Live confs are generated into `server/` from `server.conf.in`
+(`make confs`). Do not edit the generated files.
 Templates use `@NAME@` placeholders. `gen-config.py server` expands them from
 `NAME=value` arguments (or the environment) and fails if a name is
 unset or left over.
@@ -79,11 +79,12 @@ unset or left over.
 - `config.mk` — local overrides (gitignored as `/config.mk`)
 - `server.conf.in` — live unit template (UDP and TCP). Does not
   generate the Debian `server.conf` sample
-- `server-udp.conf` / `server-tcp.conf` — generated. UDP is the
-  day-to-day profile; TCP is off unless `ENABLE_TCP=yes` (hotel /
+- `server/` — generated live confs and `tc.key` (gitignored). UDP is
+  the day-to-day profile; TCP is off unless `ENABLE_TCP=yes` (hotel /
   guest-wifi fallback). `PORT_SHARE` is off unless set (e.g.
   `127.0.0.1 8443` to Apache). Apache must not `Listen` on `TCP_PORT`
   when `PORT_SHARE` is set
+- `client/` — generated `.ovpn` profiles (gitignored)
 - `server.conf` — Debian sample. Not a unit; not installed
 - `client.ovpn.in` — client template (`dev tun`, `block-ipv6`,
   `ignore-unknown-option block-outside-dns`). Placeholders `@SERVER@`
@@ -92,12 +93,11 @@ unset or left over.
   (optional TEMPLATE / `NAME=value`). `gen-config.py client SERVER_CN
   [CLIENT [CONF [OUT]]]` expands `client.ovpn.in` using port/proto/mssfix
   from a generated server conf, then inlines CA, client cert/key, and
-  `tc.key`. Fails if `SERVER_CN` is omitted. UDP →
+  `server/tc.key`. Fails if `SERVER_CN` is omitted. UDP →
   `client/$CLIENT.ovpn`; TCP → `client/$CLIENT.tcp.ovpn` (same cert)
 - `easy-rsa/` — PKI working dir (`pki/` is gitignored), plus `vars` and
   `openssl-easyrsa.cnf`. Not a full Easy-RSA checkout. Needs Debian
   `easy-rsa` (`apt install easy-rsa`)
-- `tc.key` — tls-crypt key (gitignored)
 - `Makefile` — PKI, client profiles, `confs`, `dryrun`, `install-pki`,
   `deploy`
 - `examples/50-openvpn.nft` — WAN-only host fragment. Copy to that
@@ -168,18 +168,22 @@ traffic through the tun.
 in `config.mk` to override.
 
 - `make` / `make all` — `confs`, `pki`, and profiles for `$(CLIENTS)`
-- `make confs` — generate enabled `server-udp.conf` / `server-tcp.conf`
-- `make pki` — CA, server cert, `tc.key`, initial CRL if missing.
+- `make confs` — generate enabled `server/server-udp.conf` /
+  `server/server-tcp.conf`
+- `make pki` — CA, server cert, `server/tc.key`, initial CRL if missing.
   Refuses to run as root. Does not run `gen-dh`. Requires `easy-rsa`.
   New certs use `CERT_DAYS` (3650); does not reissue existing certs
-- `make pki-clean` — delete working-tree `easy-rsa/pki`, `tc.key`,
-  and `client/`. Then `make pki` in a second invocation
+- `make clean` — delete generated server confs and `client/`
+  (keeps `server/tc.key` and Easy-RSA PKI)
+- `make distclean` / `make pki-clean` — `clean` plus `server/` and
+  `easy-rsa/pki/`. Does not delete `config.mk`
 - `make revoke CLIENT=name` — revoke that client cert and regenerate
   `pki/crl.pem`. Does not copy the CA key. Then `sudo make deploy`
 - `make clients` — `client/name.ovpn` and/or `client/name.tcp.ovpn` for
   each name in `CLIENTS` (cert if missing; skipped if that proto is off)
-- `make client/name.ovpn` — UDP profile from `server-udp.conf`
-- `make client/name.tcp.ovpn` — same cert, TCP from `server-tcp.conf`
+- `make client/name.ovpn` — UDP profile from `server/server-udp.conf`
+- `make client/name.tcp.ovpn` — same cert, TCP from
+  `server/server-tcp.conf`
 - `make dryrun` — `all`, then `diff -u` live confs against `DEST`
 - `sudo make install-pki` — copy `ca.crt`, server cert/key,
   `tc.key`, and `crl.pem` to `DEST`. Does not copy the CA private key
@@ -197,8 +201,7 @@ Generate PKI as a normal user, then `sudo make deploy`. Enable the UDP
 unit on the host (`systemctl enable --now openvpn-server@server-udp`).
 Enable `openvpn-server@server-tcp` only if `ENABLE_TCP=yes`.
 
-`easy-rsa/pki/`, `tc.key`, `client/*.ovpn`, `config.mk`, and the
-generated server confs are gitignored.
+`easy-rsa/pki/`, `server/`, `client/`, and `config.mk` are gitignored.
 
 ## Pools
 

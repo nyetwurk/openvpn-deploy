@@ -42,7 +42,7 @@ export REMOTE
 PROTOS := $(strip \
 	$(if $(filter yes,$(ENABLE_UDP)),udp) \
 	$(if $(filter yes,$(ENABLE_TCP)),tcp))
-CONFS := $(addprefix server-,$(addsuffix .conf,$(PROTOS)))
+CONFS := $(addprefix server/server-,$(addsuffix .conf,$(PROTOS)))
 UNITS := $(addprefix openvpn-server@server-,$(PROTOS))
 CLIENT_OVPNS := $(foreach p,$(PROTOS),$(addprefix client/,$(addsuffix $(if $(filter tcp,$(p)),.tcp).ovpn,$(CLIENTS))))
 IPP_FILES := $(foreach p,$(PROTOS),$(if $(filter tcp,$(p)),$(TCP_IPP),$(UDP_IPP)))
@@ -53,7 +53,7 @@ CA_CRT := $(PKI)/ca.crt
 CA_KEY := $(PKI)/private/ca.key
 SERVER_CRT := $(PKI)/issued/$(SERVER_CN).crt
 SERVER_KEY := $(PKI)/private/$(SERVER_CN).key
-TC_KEY := tc.key
+TC_KEY := server/tc.key
 CRL := $(PKI)/crl.pem
 
 NEED_USER := test "$$(id -u)" -ne 0 || { echo "generate PKI as non-root; run make, then sudo make deploy"; exit 1; }
@@ -69,7 +69,7 @@ BLOCK_OUTSIDE_DNS_PUSH := $(if $(strip $(DNS)),push "block-outside-dns")
 CONF_DEPS := server.conf.in gen-config.py Makefile $(wildcard config.mk)
 
 .DEFAULT_GOAL := all
-.PHONY: all confs pki pki-clean clients dryrun deploy install-pki revoke
+.PHONY: all confs pki pki-clean clean distclean clients dryrun deploy install-pki revoke
 .SECONDARY:
 
 all: confs pki clients
@@ -78,6 +78,7 @@ confs: $(CONFS)
 
 # $(call emit_conf,proto,port,dev,pool,ipp,port_share,exit_notify)
 define emit_conf
+	mkdir -p "$(dir $@)"
 	SERVER_CN='$(SERVER_CN)' \
 	PROTO='$(1)' PORT='$(2)' DEV='$(3)' POOL='$(4)' IPP='$(5)' \
 	PORT_SHARE='$(6)' EXIT_NOTIFY='$(7)' \
@@ -90,17 +91,23 @@ define emit_conf
 	mv $@.tmp $@
 endef
 
-pki-clean:
-	rm -rf $(PKI) $(TC_KEY) server/ta.key server/tc.key client
+clean:
+	rm -rf client
+	rm -f server/server-*.conf server/openvpn.nft server/*.tmp
+
+distclean pki-clean: clean
+	rm -rf server $(PKI)
+
+pki-clean: distclean
 
 pki: $(CA_CRT) $(SERVER_CRT) $(TC_KEY) $(CRL)
 
 clients: $(CLIENT_OVPNS)
 
-server-udp.conf: $(CONF_DEPS)
+server/server-udp.conf: $(CONF_DEPS)
 	$(call emit_conf,udp,$(UDP_PORT),$(UDP_DEV),$(UDP_POOL),$(UDP_IPP),,explicit-exit-notify 1)
 
-server-tcp.conf: $(CONF_DEPS)
+server/server-tcp.conf: $(CONF_DEPS)
 	$(call emit_conf,tcp,$(TCP_PORT),$(TCP_DEV),$(TCP_POOL),$(TCP_IPP),$(PORT_SHARE_LINE),)
 
 $(SERIAL):
@@ -121,6 +128,7 @@ $(SERVER_CRT) $(SERVER_KEY) &: $(CA_CRT)
 
 $(TC_KEY):
 	@$(NEED_USER)
+	mkdir -p "$(dir $@)"
 	$(OPENVPN) --genkey tls-crypt $@
 	chmod 600 $@
 
@@ -135,16 +143,16 @@ $(PKI)/issued/%.crt $(PKI)/private/%.key &: $(CA_CRT)
 	cd easy-rsa && $(EASYRSA) --batch --days=$(CERT_DAYS) --nopass build-client-full "$*"
 
 client/%.ovpn: Makefile gen-config.py $(PKI)/issued/%.crt $(PKI)/private/%.key $(CA_CRT) $(TC_KEY) \
-		client.ovpn.in server-udp.conf $(wildcard config.mk)
-	mkdir -p $(dir $@)
-	./gen-config.py client "$(SERVER_CN)" "$*" server-udp.conf $@.tmp
+		client.ovpn.in server/server-udp.conf $(wildcard config.mk)
+	mkdir -p "$(dir $@)"
+	./gen-config.py client "$(SERVER_CN)" "$*" server/server-udp.conf $@.tmp
 	mv $@.tmp $@
 	chmod 600 $@
 
 client/%.tcp.ovpn: Makefile gen-config.py $(PKI)/issued/%.crt $(PKI)/private/%.key $(CA_CRT) $(TC_KEY) \
-		client.ovpn.in server-tcp.conf $(wildcard config.mk)
-	mkdir -p $(dir $@)
-	./gen-config.py client "$(SERVER_CN)" "$*" server-tcp.conf $@.tmp
+		client.ovpn.in server/server-tcp.conf $(wildcard config.mk)
+	mkdir -p "$(dir $@)"
+	./gen-config.py client "$(SERVER_CN)" "$*" server/server-tcp.conf $@.tmp
 	mv $@.tmp $@
 	chmod 600 $@
 
@@ -158,8 +166,8 @@ revoke:
 	@echo "revoked $(CLIENT); sudo make deploy to install the new CRL"
 
 dryrun: all
-	@for f in $(CONFS); do echo "=== $$f ==="; \
-		diff -u "$(DEST)/$$f" "$$f" || true; \
+	@for f in $(CONFS); do b=$$(basename "$$f"); echo "=== $$b ==="; \
+		diff -u "$(DEST)/$$b" "$$f" || true; \
 	done
 
 # PKI files are sources to copy, not Make deps (sudo must not generate them).

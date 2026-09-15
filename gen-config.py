@@ -103,7 +103,7 @@ def cmd_client(argv: list[str]) -> None:
         die("usage: gen-config.py client SERVER_CN [CLIENT [CONF [OUT]]]")
     server = argv[0]
     client = argv[1] if len(argv) > 1 else login_name()
-    conf = Path(argv[2] if len(argv) > 2 else "server-udp.conf")
+    conf = Path(argv[2] if len(argv) > 2 else "server/server-udp.conf")
     out = Path(argv[3] if len(argv) > 3 else f"client/{client}.ovpn")
     remote = os.environ.get("REMOTE") or server
 
@@ -146,7 +146,7 @@ def cmd_client(argv: list[str]) -> None:
         )
         + "\n</key>\n"
         + "<tls-crypt>\n"
-        + pem_block(Path("tc.key"), "BEGIN OpenVPN Static key V1", "END OpenVPN Static key V1")
+        + pem_block(Path("server/tc.key"), "BEGIN OpenVPN Static key V1", "END OpenVPN Static key V1")
         + "\n</tls-crypt>\n"
     )
     out.parent.mkdir(parents=True, exist_ok=True)

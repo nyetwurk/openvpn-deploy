@@ -6,12 +6,6 @@ __pycache__/
 *~
 *.bak
 easy-rsa/pki/
-server/ta.key
-server/tc.key
-tc.key
-client/*.ovpn
-client/*.ovpn.tmp
+server/
+client/
 /config.mk
-server-udp.conf
-server-tcp.conf
-server-*.conf.tmp

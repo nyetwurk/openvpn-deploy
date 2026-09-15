@@ -1,0 +1,35 @@
+# Generated live unit. Annotated sample: server.conf
+# TUN. Not 10.8.0.0/24 (other VPN).
+
+port @PORT@
+@PORT_SHARE@
+proto @PROTO@
+dev @DEV@
+topology subnet
+
+ca easy-rsa/pki/ca.crt
+cert easy-rsa/pki/issued/@SERVER_CN@.crt
+key easy-rsa/pki/private/@SERVER_CN@.key
+dh easy-rsa/pki/dh.pem
+tls-auth server/ta.key 0
+
+server @POOL@
+ifconfig-pool-persist @IPP@
+
+@REDIRECT_GATEWAY_PUSH@
+@LAN_ROUTE_PUSH@
+@DNS_PUSH@
+
+keepalive 10 120
+data-ciphers @CIPHER@
+cipher @CIPHER@
+# clamp inner TCP MSS; do not use fragment (Android FRAG_IN errors)
+mssfix @MSSFIX@
+
+user nobody
+group nogroup
+persist-key
+persist-tun
+
+#verb 3
+@EXIT_NOTIFY@

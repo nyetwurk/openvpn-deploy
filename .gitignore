@@ -7,3 +7,8 @@ plans/
 easy-rsa/pki/
 server/ta.key
 client/*.ovpn
+client/*.ovpn.tmp
+config.mk
+server-udp.conf
+server-tcp.conf
+server-*.conf.tmp

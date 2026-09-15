@@ -1,0 +1,48 @@
+#!/bin/bash
+
+set -euo pipefail
+
+usage() {
+	echo "usage: $0 TEMPLATE [NAME=value ...]" >&2
+	exit 1
+}
+
+[ $# -ge 1 ] || usage
+TEMPLATE=$1
+shift
+[ -f "$TEMPLATE" ] || { echo "subst: missing $TEMPLATE" >&2; exit 1; }
+
+for kv in "$@"; do
+	case "$kv" in
+	*=*)
+		export "${kv%%=*}=${kv#*=}"
+		;;
+	*)
+		usage
+		;;
+	esac
+done
+
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+cp "$TEMPLATE" "$tmp"
+
+names=$(grep -oE '@[A-Z][A-Z0-9_]*@' "$tmp" | tr -d '@' | sort -u || true)
+
+for name in $names; do
+	if [ -z "${!name+x}" ]; then
+		echo "subst: $TEMPLATE: @$name@ is unset" >&2
+		exit 1
+	fi
+	val=${!name}
+	val_esc=$(printf '%s\n' "$val" | sed -e 's/[&|\\]/\\&/g')
+	sed -i "s|@$name@|$val_esc|g" "$tmp"
+done
+
+if grep -qE '@[A-Z][A-Z0-9_]*@' "$tmp"; then
+	echo "subst: unsubstituted placeholder in $TEMPLATE" >&2
+	grep -E '@[A-Z][A-Z0-9_]*@' "$tmp" >&2 || true
+	exit 1
+fi
+
+cat "$tmp"

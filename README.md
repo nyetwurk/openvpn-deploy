@@ -4,43 +4,94 @@ Source of truth for the TUN servers on this NAT router. Edit here.
 `/etc/openvpn/server` is the install target. Live daemons are Debian
 `openvpn-server@.service` (`WorkingDirectory=/etc/openvpn/server`,
 `ProtectHome=true`). Units: `openvpn-server@server-udp` and
-`openvpn-server@server-tcp`.
+`openvpn-server@server-tcp` when those listeners are enabled.
 
-Firewall policy for `tun0` / `tun1` is the sibling nftables tree
-(`../nftables`), not this repo.
+Firewall policy for the TUN devices is the sibling nftables tree
+(`../nftables`), not this repo. If you change `UDP_DEV` / `TCP_DEV` or
+the VPN pools, update nftables too.
+
+## Configuration
+
+Site overrides live in `config.mk` (gitignored). Defaults are in the
+Makefile. Copy the example and uncomment only what you change, or
+write a short `config.mk` with just those lines:
+
+```sh
+cp config-example.mk config.mk
+```
+
+`make` works without `config.mk`. `make VAR=...` still overrides.
+
+`config.mk` is the place for identity, listeners, and the networks
+pushed to clients. Left as constants: `user nobody` / `group nogroup`,
+`keepalive`, `topology subnet`, persist flags, and the Debian sample
+`server.conf`.
+
+| Variable | Role |
+| --- | --- |
+| `SERVER_CN` | Server cert CN; client `verify-x509-name` |
+| `REMOTE` | Client `remote` hostname (defaults to `SERVER_CN`) |
+| `ENABLE_UDP` / `ENABLE_TCP` | `yes` to build, install, and restart that unit (TCP defaults to `no`) |
+| `UDP_PORT` / `TCP_PORT` | Listen ports |
+| `UDP_DEV` / `TCP_DEV` | TUN devices (`tun0` / `tun1`) |
+| `UDP_POOL` / `TCP_POOL` | VPN pools (`address netmask`) |
+| `LAN_ROUTE` / `DNS` | Pushed LAN route and DNS; empty / default = omit |
+| `CIPHER` / `MSSFIX` | Data cipher and MSS clamp |
+| `REDIRECT_GATEWAY` | Full-tunnel push; empty = split tunnel |
+| `PORT_SHARE` | TCP non-OpenVPN forward (`host port`); empty / default = off |
+| `DEST` / `CLIENTS` | Install dir and profile names (already make vars) |
+
+Changing `SERVER_CN` after `make pki` needs a new server cert. Disabling
+a listener does not stop a unit already enabled on the host.
+
+Live `server-udp.conf` and `server-tcp.conf` are generated from
+`server.conf.in` (`make confs`). Do not edit the generated files.
+Templates use `@NAME@` placeholders. `subst` expands them from
+`NAME=value` arguments (or the environment) and fails if a name is
+unset or left over.
 
 ## Files
 
-- `server-udp.conf` — live UDP unit `openvpn-server@server-udp`. Port
-  `1194`, `tun0`, pool `10.8.19.0/24`. Day-to-day profile
-- `server-tcp.conf` — live TCP unit `openvpn-server@server-tcp`. Port
-  `443`, `tun1`, pool `10.8.20.0/24`. Hotel/guest-wifi fallback.
-  `port-share 127.0.0.1 8443` sends non-OpenVPN TCP (HTTPS) to Apache.
-  Apache must not `Listen 443`.
+- `config-example.mk` — commented override list (defaults are in the
+  Makefile). Copy to `config.mk` and uncomment what you change
+- `config.mk` — local overrides (gitignored)
+- `server.conf.in` — live unit template (UDP and TCP). Does not
+  generate the Debian `server.conf` sample
+- `server-udp.conf` / `server-tcp.conf` — generated. UDP is the
+  day-to-day profile; TCP is off unless `ENABLE_TCP=yes` (hotel /
+  guest-wifi fallback). `PORT_SHARE` is off unless set (e.g.
+  `127.0.0.1 8443` to Apache). Apache must not `Listen` on `TCP_PORT`
+  when `PORT_SHARE` is set
 - `server.conf` — Debian sample. Not a unit; not installed
-- `client.ovpn` — client template (`dev tun`, `block-ipv6`, `mssfix
-  1360`). Placeholders `_SERVER_` `_PORT_` `_PROTO_` `_CIPHER_`
-- `client-gen` — fills the template from a live server conf and inlines
-  CA, client cert/key, and `ta.key`. UDP → `client/$CLIENT.ovpn`; TCP →
-  `client/$CLIENT.tcp.ovpn` (same cert)
+- `client.ovpn.in` — client template (`dev tun`, `block-ipv6`).
+  Placeholders `@SERVER@` `@REMOTE@` `@PORT@` `@PROTO@` `@CIPHER@`
+  `@MSSFIX@`
+- `subst` — `subst TEMPLATE [NAME=value ...]`. Shared `@NAME@`
+  expander for `server.conf.in` and `client.ovpn.in`
+- `client-gen` — `client-gen SERVER_CN [CLIENT [CONF [OUT]]]`. Runs
+  `subst` on `client.ovpn.in` using port/proto/cipher/mssfix from a
+  generated server conf, then inlines CA, client cert/key, and
+  `ta.key`. Fails if `SERVER_CN` is omitted. UDP →
+  `client/$CLIENT.ovpn`; TCP → `client/$CLIENT.tcp.ovpn` (same cert)
 - `easy-rsa/` — Easy-RSA 3. PKI is `easy-rsa/pki/` (gitignored)
 - `server/ta.key` — tls-auth key (gitignored)
-- `Makefile` — PKI, client profiles, `dryrun`, `install-pki`, `deploy`
+- `Makefile` — PKI, client profiles, `confs`, `dryrun`, `install-pki`,
+  `deploy`
 
 Cert paths in the live confs are relative to `/etc/openvpn/server`:
 
 - `ca easy-rsa/pki/ca.crt`
-- `cert easy-rsa/pki/issued/vpn.internal.curtisfong.org.crt`
-- `key easy-rsa/pki/private/vpn.internal.curtisfong.org.key`
+- `cert easy-rsa/pki/issued/$(SERVER_CN).crt`
+- `key easy-rsa/pki/private/$(SERVER_CN).key`
 - `dh easy-rsa/pki/dh.pem`
 - `tls-auth server/ta.key 0`
 
-Both servers push `redirect-gateway def1 bypass-dhcp`, LAN route
-`192.168.19.0/24`, and DNS `192.168.19.1`. Cipher is `AES-256-CBC`.
-UDP has `explicit-exit-notify`. Both have `mssfix 1360`. Do not use
-`fragment` (OpenVPN Connect on Android trips `FRAG_IN` on the server).
-No `log` / `log-append` and no `verb` (OpenVPN default is 1). The
-units stay in the foreground; journald takes stdout
+Defaults push `redirect-gateway def1 bypass-dhcp`. `LAN_ROUTE` and
+`DNS` are omitted unless set in `config.mk`. Cipher is
+`AES-256-CBC`. UDP has `explicit-exit-notify`. Both have `mssfix 1360`.
+Do not use `fragment` (OpenVPN Connect on Android trips `FRAG_IN` on
+the server). No `log` / `log-append` and no `verb` (OpenVPN default is
+1). The units stay in the foreground; journald takes stdout
 (`journalctl -u openvpn-server@server-udp` /
 `openvpn-server@server-tcp`). The stock unit already passes
 `--suppress-timestamps` and `--status
@@ -54,47 +105,52 @@ them. Do not use the legacy `openvpn@` template
 (`/etc/openvpn/%i.conf`). TCP `port-share` still logs non-OpenVPN
 accepts at verb 1; that is expected, not a VPN client.
 
-The client remote is `vpn.internal.curtisfong.org`. UDP profiles use
-port `1194`; TCP profiles use `443`. `verify-x509-name` uses that CN.
-Import one `.ovpn` per device in OpenVPN Connect. Do not run UDP and
-TCP profiles at the same time. UDP is the daily transport; TCP is only
-when UDP is blocked.
+The client remote defaults to `SERVER_CN`
+(`example.com`). UDP profiles use `UDP_PORT` (`1194`);
+TCP profiles use `TCP_PORT` (`443`). `verify-x509-name` uses
+`SERVER_CN`. Import one `.ovpn` per device in OpenVPN Connect. Do not
+run UDP and TCP profiles at the same time. UDP is the daily transport;
+TCP is only when UDP is blocked.
 
 A LAN host connecting to the WAN IP is local INPUT on this box (no
-DNAT hairpin). `push "route 192.168.19.0/24"` then sends other LAN
+DNAT hairpin). When `LAN_ROUTE` is set, that push sends other LAN
 traffic through the tun.
 
 ## Make
 
 `DEST` defaults to `/etc/openvpn/server`. `SERVER_CN` defaults to
-`vpn.internal.curtisfong.org`. `CLIENTS` defaults to `id -un` (or
-`SUDO_USER` if make is root).
+`example.com`. `CLIENTS` defaults to `id -un` (or
+`SUDO_USER` if make is root). Uncomment those in `config.mk` to
+override.
 
-- `make` / `make all` — `pki` plus UDP and TCP profiles for `$(CLIENTS)`
+- `make` / `make all` — `confs`, `pki`, and profiles for `$(CLIENTS)`
+- `make confs` — generate enabled `server-udp.conf` / `server-tcp.conf`
 - `make pki` — CA, server cert, DH, `server/ta.key` if missing.
   Refuses to run as root
 - `make pki-clean` — delete working-tree `easy-rsa/pki`, `server/ta.key`,
   and `client/`. Then `make pki` in a second invocation
-- `make clients` — `client/name.ovpn` and `client/name.tcp.ovpn` for
-  each name in `CLIENTS` (cert if missing)
+- `make clients` — `client/name.ovpn` and/or `client/name.tcp.ovpn` for
+  each name in `CLIENTS` (cert if missing; skipped if that proto is off)
 - `make client/name.ovpn` — UDP profile from `server-udp.conf`
-- `make client/name.tcp.ovpn` — same cert, TCP `443` from
-  `server-tcp.conf`
+- `make client/name.tcp.ovpn` — same cert, TCP from `server-tcp.conf`
 - `make dryrun` — `diff -u` live confs against `DEST`
 - `sudo make install-pki` — copy `ca.crt`, server cert/key, `dh.pem`,
   and `ta.key` to `DEST`. Does not copy the CA private key. Does not
   generate; fails if `make pki` has not been run
-- `sudo make deploy` — `install-pki`, install the two live confs,
-  `daemon-reload`, `try-restart` the two units. Does not install
+- `sudo make deploy` — `install-pki`, install the enabled live confs,
+  `daemon-reload`, `try-restart` those units. Does not install
   `server.conf`. Does not enable units
 
-Generate PKI as a normal user, then `sudo make deploy`. Enable units
-on the host (`systemctl enable --now openvpn-server@server-udp
-openvpn-server@server-tcp`).
+Generate PKI as a normal user, then `sudo make deploy`. Enable the UDP
+unit on the host (`systemctl enable --now openvpn-server@server-udp`).
+Enable `openvpn-server@server-tcp` only if `ENABLE_TCP=yes`.
 
-`easy-rsa/pki/`, `server/ta.key`, and `client/*.ovpn` are gitignored.
+`easy-rsa/pki/`, `server/ta.key`, `client/*.ovpn`, `config.mk`, and the
+generated server confs are gitignored.
 
 ## Pools
+
+Defaults:
 
 - `tun0` — `10.8.19.0/24` (UDP)
 - `tun1` — `10.8.20.0/24` (TCP)

@@ -17,14 +17,13 @@ remote=${REMOTE:-$server}
 
 port=$(grep "^port " "$CONF" | cut -f 2 -d " " || true)
 proto=$(grep "^proto " "$CONF" | cut -f 2 -d " " || true)
-cipher=$(grep "^cipher " "$CONF" | cut -f 2 -d " " || true)
 mssfix=$(grep "^mssfix " "$CONF" | cut -f 2 -d " " || true)
 
 [ -z "$proto" ] && proto=udp
 [ -z "$port" ] && port=1194
 [ -z "$mssfix" ] && mssfix=1360
 
-echo "got $CONF $port $proto $cipher -> $OUT" >&2
+echo "got $CONF $port $proto -> $OUT" >&2
 mkdir -p "$(dirname "$OUT")"
 umask 077
 rm -f "$OUT"
@@ -35,7 +34,6 @@ install -m 600 /dev/null "$OUT"
 	SERVER="$server" \
 	PORT="$port" \
 	PROTO="$proto" \
-	CIPHER="$cipher" \
 	MSSFIX="$mssfix"
 
 echo "<ca>"
@@ -50,7 +48,7 @@ echo "<key>"
 sed -n '/BEGIN PRIVATE KEY/,/END PRIVATE KEY/p' < easy-rsa/pki/private/$CLIENT.key
 echo "</key>"
 
-echo "<tls-auth>"
-sed -n '/BEGIN OpenVPN Static key V1/,/END OpenVPN Static key V1/p' < server/ta.key
-echo "</tls-auth>"
+echo "<tls-crypt>"
+sed -n '/BEGIN OpenVPN Static key V1/,/END OpenVPN Static key V1/p' < tc.key
+echo "</tls-crypt>"
 ) > "$OUT"

@@ -6,6 +6,8 @@ plans/
 *.bak
 easy-rsa/pki/
 server/ta.key
+server/tc.key
+tc.key
 client/*.ovpn
 client/*.ovpn.tmp
 /config.mk

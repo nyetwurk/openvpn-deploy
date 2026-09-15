@@ -10,8 +10,10 @@ topology subnet
 ca easy-rsa/pki/ca.crt
 cert easy-rsa/pki/issued/@SERVER_CN@.crt
 key easy-rsa/pki/private/@SERVER_CN@.key
-dh easy-rsa/pki/dh.pem
-tls-auth server/ta.key 0
+dh none
+tls-crypt tc.key
+tls-version-min 1.2
+crl-verify crl.pem
 
 server @POOL@
 ifconfig-pool-persist @IPP@
@@ -19,10 +21,11 @@ ifconfig-pool-persist @IPP@
 @REDIRECT_GATEWAY_PUSH@
 @LAN_ROUTE_PUSH@
 @DNS_PUSH@
+@BLOCK_OUTSIDE_DNS_PUSH@
 
 keepalive 10 120
-data-ciphers @CIPHER@
-cipher @CIPHER@
+# OpenVPN 2.6 default data-ciphers (GCM). CIPHER= sets fallback for old clients.
+@CIPHER_LINE@
 # clamp inner TCP MSS; do not use fragment (Android FRAG_IN errors)
 mssfix @MSSFIX@
 

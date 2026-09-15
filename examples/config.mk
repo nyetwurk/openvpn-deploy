@@ -32,11 +32,16 @@
 # Empty = do not push. Wrong LAN_ROUTE can steal a client's local subnet.
 # LAN_ROUTE = 192.168.1.0 255.255.255.0
 # Empty = clients keep their resolver. Full tunnel still works.
+# When set, also push block-outside-dns (Windows leak).
 # DNS = 192.168.1.1
 
-# UDP_IPP = /var/log/openvpn/ipp.txt
-# TCP_IPP = /var/log/openvpn/ipp-tcp.txt
+# Pool persist. Daemon-written; not /etc and not /var/log.
+# Deploy creates the dir/files 0750/0640 nobody:adm if missing.
+# STATE_DIR = /var/lib/openvpn-server
+# UDP_IPP = /var/lib/openvpn-server/ipp.txt
+# TCP_IPP = /var/lib/openvpn-server/ipp-tcp.txt
 
+# Optional data-ciphers-fallback for old clients. Empty = OpenVPN 2.6 GCM.
 # CIPHER = AES-256-CBC
 # MSSFIX = 1360
 
@@ -50,3 +55,6 @@
 # DEST = /etc/openvpn/server
 # CLIENTS = alice bob
 # OPENVPN = /usr/sbin/openvpn
+# EASYRSA = /usr/share/easy-rsa/easyrsa
+# New certs only. Does not reissue.
+# CERT_DAYS = 3650

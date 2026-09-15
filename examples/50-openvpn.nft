@@ -13,7 +13,8 @@
 # SNAT lives in table ip openvpn (delete then define so a second
 # nft -f of this file is idempotent).
 #
-# Also: net.ipv4.ip_forward=1 (sysctl, not nft).
+# Also: copy examples/99-openvpn-forward.conf to /etc/sysctl.d/
+# (net.ipv4.ip_forward=1; sysctl, not nft).
 # This file does not punch input; rfc1918_drop still matches 10/8
 # on the host itself. Client → public net is forward + masquerade.
 

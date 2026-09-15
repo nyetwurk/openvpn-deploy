@@ -12,7 +12,6 @@ cert easy-rsa/pki/issued/@SERVER_CN@.crt
 key easy-rsa/pki/private/@SERVER_CN@.key
 dh none
 tls-crypt tc.key
-tls-version-min 1.2
 crl-verify crl.pem
 
 server @POOL@
@@ -24,8 +23,6 @@ ifconfig-pool-persist @IPP@
 @BLOCK_OUTSIDE_DNS_PUSH@
 
 keepalive 10 120
-# OpenVPN 2.6 default data-ciphers (GCM). CIPHER= sets fallback for old clients.
-@CIPHER_LINE@
 # clamp inner TCP MSS; do not use fragment (Android FRAG_IN errors)
 mssfix @MSSFIX@
 

@@ -4,8 +4,15 @@ SHELL := /bin/bash
 -include config.mk
 
 DEST ?= /etc/openvpn/server
-SERVER_CN ?= example.com
-REMOTE ?= $(SERVER_CN)
+# REMOTE is required (hostname clients dial). No example.com default.
+ifeq ($(strip $(REMOTE)),)
+$(error REMOTE is required; set it in config.mk)
+endif
+ifeq ($(REMOTE),example.com)
+$(error REMOTE=example.com is not allowed; set a real hostname in config.mk)
+endif
+# Cert CN / verify-x509-name. Follows REMOTE unless set.
+SERVER_CN ?= $(REMOTE)
 # login that owns the process (SUDO_USER if uid 0)
 CLIENTS ?= $(shell test "$$(id -u)" -eq 0 && printf '%s\n' "$${SUDO_USER:-$$(id -un)}" || id -un)
 OPENVPN ?= /usr/sbin/openvpn
@@ -24,7 +31,6 @@ DNS ?=
 STATE_DIR ?= /var/lib/openvpn-server
 UDP_IPP ?= $(STATE_DIR)/ipp.txt
 TCP_IPP ?= $(STATE_DIR)/ipp-tcp.txt
-CIPHER ?=
 MSSFIX ?= 1360
 REDIRECT_GATEWAY ?= redirect-gateway def1 bypass-dhcp
 PORT_SHARE ?=
@@ -32,23 +38,14 @@ CERT_DAYS ?= 3650
 
 export REMOTE
 
-# server.conf is the Debian sample (not a unit). Live units from ENABLE_*.
-CONFS :=
-UNITS :=
-CLIENT_OVPNS :=
-IPP_FILES :=
-ifeq ($(ENABLE_UDP),yes)
-CONFS += server-udp.conf
-UNITS += openvpn-server@server-udp
-CLIENT_OVPNS += $(addprefix client/,$(addsuffix .ovpn,$(CLIENTS)))
-IPP_FILES += $(UDP_IPP)
-endif
-ifeq ($(ENABLE_TCP),yes)
-CONFS += server-tcp.conf
-UNITS += openvpn-server@server-tcp
-CLIENT_OVPNS += $(addprefix client/,$(addsuffix .tcp.ovpn,$(CLIENTS)))
-IPP_FILES += $(TCP_IPP)
-endif
+# Listeners. ENABLE_*=yes includes that proto (udp / tcp).
+PROTOS := $(strip \
+	$(if $(filter yes,$(ENABLE_UDP)),udp) \
+	$(if $(filter yes,$(ENABLE_TCP)),tcp))
+CONFS := $(addprefix server-,$(addsuffix .conf,$(PROTOS)))
+UNITS := $(addprefix openvpn-server@server-,$(PROTOS))
+CLIENT_OVPNS := $(foreach p,$(PROTOS),$(addprefix client/,$(addsuffix $(if $(filter tcp,$(p)),.tcp).ovpn,$(CLIENTS))))
+IPP_FILES := $(foreach p,$(PROTOS),$(if $(filter tcp,$(p)),$(TCP_IPP),$(UDP_IPP)))
 
 PKI := easy-rsa/pki
 SERIAL := $(PKI)/serial
@@ -68,9 +65,8 @@ PORT_SHARE_LINE := $(if $(strip $(PORT_SHARE)),port-share $(PORT_SHARE))
 LAN_ROUTE_PUSH := $(if $(strip $(LAN_ROUTE)),push "route $(LAN_ROUTE)")
 DNS_PUSH := $(if $(strip $(DNS)),push "dhcp-option DNS $(DNS)")
 BLOCK_OUTSIDE_DNS_PUSH := $(if $(strip $(DNS)),push "block-outside-dns")
-CIPHER_LINE := $(if $(strip $(CIPHER)),data-ciphers-fallback $(CIPHER))
 
-CONF_DEPS := server.conf.in subst Makefile $(wildcard config.mk)
+CONF_DEPS := server.conf.in gen-config.py Makefile $(wildcard config.mk)
 
 .DEFAULT_GOAL := all
 .PHONY: all confs pki pki-clean clients dryrun deploy install-pki revoke
@@ -88,10 +84,9 @@ define emit_conf
 	LAN_ROUTE_PUSH='$(LAN_ROUTE_PUSH)' \
 	DNS_PUSH='$(DNS_PUSH)' \
 	BLOCK_OUTSIDE_DNS_PUSH='$(BLOCK_OUTSIDE_DNS_PUSH)' \
-	CIPHER_LINE='$(CIPHER_LINE)' \
 	MSSFIX='$(MSSFIX)' \
 	REDIRECT_GATEWAY_PUSH='$(REDIRECT_GATEWAY_PUSH)' \
-	./subst server.conf.in > $@.tmp
+	./gen-config.py server > $@.tmp
 	mv $@.tmp $@
 endef
 
@@ -139,17 +134,17 @@ $(PKI)/issued/%.crt $(PKI)/private/%.key &: $(CA_CRT)
 	@$(NEED_EASYRSA)
 	cd easy-rsa && $(EASYRSA) --batch --days=$(CERT_DAYS) --nopass build-client-full "$*"
 
-client/%.ovpn: Makefile client-gen subst $(PKI)/issued/%.crt $(PKI)/private/%.key $(CA_CRT) $(TC_KEY) \
+client/%.ovpn: Makefile gen-config.py $(PKI)/issued/%.crt $(PKI)/private/%.key $(CA_CRT) $(TC_KEY) \
 		client.ovpn.in server-udp.conf $(wildcard config.mk)
 	mkdir -p $(dir $@)
-	./client-gen "$(SERVER_CN)" "$*" server-udp.conf $@.tmp
+	./gen-config.py client "$(SERVER_CN)" "$*" server-udp.conf $@.tmp
 	mv $@.tmp $@
 	chmod 600 $@
 
-client/%.tcp.ovpn: Makefile client-gen subst $(PKI)/issued/%.crt $(PKI)/private/%.key $(CA_CRT) $(TC_KEY) \
+client/%.tcp.ovpn: Makefile gen-config.py $(PKI)/issued/%.crt $(PKI)/private/%.key $(CA_CRT) $(TC_KEY) \
 		client.ovpn.in server-tcp.conf $(wildcard config.mk)
 	mkdir -p $(dir $@)
-	./client-gen "$(SERVER_CN)" "$*" server-tcp.conf $@.tmp
+	./gen-config.py client "$(SERVER_CN)" "$*" server-tcp.conf $@.tmp
 	mv $@.tmp $@
 	chmod 600 $@
 
@@ -162,7 +157,7 @@ revoke:
 	cd easy-rsa && $(EASYRSA) --batch gen-crl
 	@echo "revoked $(CLIENT); sudo make deploy to install the new CRL"
 
-dryrun: $(CONFS)
+dryrun: all
 	@for f in $(CONFS); do echo "=== $$f ==="; \
 		diff -u "$(DEST)/$$f" "$$f" || true; \
 	done

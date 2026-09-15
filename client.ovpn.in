@@ -2,7 +2,6 @@ client
 dev tun
 proto @PROTO@
 remote @REMOTE@ @PORT@
-resolv-retry infinite
 nobind
 persist-key
 persist-tun

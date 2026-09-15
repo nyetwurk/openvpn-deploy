@@ -5,16 +5,18 @@
 # Defaults live in the Makefile. Repo-root config.mk is gitignored. Command-line
 # make VAR=... still overrides (do not use `override` here).
 #
-# Changing SERVER_CN after `make pki` needs a new server cert (pki-clean
-# or remove that issued cert). Changing tun/pools on the NAT router
-# needs the sibling nftables tree (../nftables). A WAN-only host uses
-# examples/50-openvpn.nft instead (not installed by make deploy).
-
-# Certificate CN, `remote`, and `verify-x509-name` unless REMOTE is set.
-# SERVER_CN = example.com
-
-# Hostname clients dial. Defaults to SERVER_CN when omitted.
+# Required. Hostname clients dial, and the server cert CN unless SERVER_CN
+# is set. Make fails if this is empty or `example.com`.
 # REMOTE = vpn.example.com
+
+# Server cert CN and `verify-x509-name`. Defaults to REMOTE.
+# Changing this after `make pki` needs a new server cert (pki-clean
+# or remove that issued cert).
+# SERVER_CN = vpn.internal.example.com
+
+# Changing tun/pools on the NAT router needs the sibling nftables tree
+# (../nftables). A WAN-only host uses examples/50-openvpn.nft instead
+# (not installed by make deploy).
 
 # Listeners. Anything other than `yes` skips that unit, its conf, and
 # its client profiles. Stop leftover units on the host yourself.
@@ -41,8 +43,6 @@
 # UDP_IPP = /var/lib/openvpn-server/ipp.txt
 # TCP_IPP = /var/lib/openvpn-server/ipp-tcp.txt
 
-# Optional data-ciphers-fallback for old clients. Empty = OpenVPN 2.6 GCM.
-# CIPHER = AES-256-CBC
 # MSSFIX = 1360
 
 # Full-tunnel push. Empty = split tunnel (LAN_ROUTE only).

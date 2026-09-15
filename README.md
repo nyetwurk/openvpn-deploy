@@ -35,23 +35,24 @@ write a short `config.mk` with just those lines:
 cp examples/config.mk config.mk
 ```
 
-`make` works without `config.mk`. `make VAR=...` still overrides.
+`make` requires `REMOTE` (`config.mk` or `make REMOTE=...`). Other
+`make VAR=...` still override.
 
 `config.mk` is the place for identity, listeners, and the networks
-pushed to clients. Left as constants: `user nobody` / `group nogroup`,
+pushed to clients. `REMOTE` is required (no `example.com` default).
+Left as constants: `user nobody` / `group nogroup`,
 `keepalive`, `topology subnet`, persist flags, and the Debian sample
 `server.conf`.
 
 | Variable | Role |
 | --- | --- |
-| `SERVER_CN` | Server cert CN; client `verify-x509-name` |
-| `REMOTE` | Client `remote` hostname (defaults to `SERVER_CN`) |
+| `REMOTE` | Required. Client `remote` hostname; server cert CN unless `SERVER_CN` is set |
+| `SERVER_CN` | Optional cert CN / `verify-x509-name`; defaults to `REMOTE` |
 | `ENABLE_UDP` / `ENABLE_TCP` | `yes` to build, install, and restart that unit (TCP defaults to `no`) |
 | `UDP_PORT` / `TCP_PORT` | Listen ports |
 | `UDP_DEV` / `TCP_DEV` | TUN devices (`tun0` / `tun1`) |
 | `UDP_POOL` / `TCP_POOL` | VPN pools (`address netmask`) |
 | `LAN_ROUTE` / `DNS` | Pushed LAN route and DNS; empty = omit. `DNS` also pushes `block-outside-dns` |
-| `CIPHER` | Optional `data-ciphers-fallback`; empty = OpenVPN 2.6 GCM |
 | `MSSFIX` | MSS clamp |
 | `REDIRECT_GATEWAY` | Full-tunnel push; empty = split tunnel |
 | `PORT_SHARE` | TCP non-OpenVPN forward (`host port`); empty / default = off |
@@ -60,20 +61,21 @@ pushed to clients. Left as constants: `user nobody` / `group nogroup`,
 | `UDP_IPP` / `TCP_IPP` | `ifconfig-pool-persist` paths under `STATE_DIR` |
 | `CERT_DAYS` | Lifetime for **new** CA/server/client certs (`3650`) |
 
-Changing `SERVER_CN` after `make pki` needs a new server cert. Disabling
-a listener does not stop a unit already enabled on the host.
+Changing `SERVER_CN` (or `REMOTE`, when `SERVER_CN` is unset) after
+`make pki` needs a new server cert. Disabling a listener does not stop
+a unit already enabled on the host.
 
 Live `server-udp.conf` and `server-tcp.conf` are generated from
 `server.conf.in` (`make confs`). Do not edit the generated files.
-Templates use `@NAME@` placeholders. `subst` expands them from
+Templates use `@NAME@` placeholders. `gen-config.py server` expands them from
 `NAME=value` arguments (or the environment) and fails if a name is
 unset or left over.
 
 ## Files
 
 - `examples/config.mk` — commented override list (defaults are in the
-  Makefile). Copy to `config.mk` at the repo root and uncomment what
-  you change
+  Makefile). Copy to `config.mk` at the repo root, set `REMOTE`, and
+  uncomment what else you change
 - `config.mk` — local overrides (gitignored as `/config.mk`)
 - `server.conf.in` — live unit template (UDP and TCP). Does not
   generate the Debian `server.conf` sample
@@ -86,11 +88,10 @@ unset or left over.
 - `client.ovpn.in` — client template (`dev tun`, `block-ipv6`,
   `ignore-unknown-option block-outside-dns`). Placeholders `@SERVER@`
   `@REMOTE@` `@PORT@` `@PROTO@` `@MSSFIX@`
-- `subst` — `subst TEMPLATE [NAME=value ...]`. Shared `@NAME@`
-  expander for `server.conf.in` and `client.ovpn.in`
-- `client-gen` — `client-gen SERVER_CN [CLIENT [CONF [OUT]]]`. Runs
-  `subst` on `client.ovpn.in` using port/proto/mssfix from a
-  generated server conf, then inlines CA, client cert/key, and
+- `gen-config.py` — `gen-config.py server` expands `@NAME@` in `server.conf.in`
+  (optional TEMPLATE / `NAME=value`). `gen-config.py client SERVER_CN
+  [CLIENT [CONF [OUT]]]` expands `client.ovpn.in` using port/proto/mssfix
+  from a generated server conf, then inlines CA, client cert/key, and
   `tc.key`. Fails if `SERVER_CN` is omitted. UDP →
   `client/$CLIENT.ovpn`; TCP → `client/$CLIENT.tcp.ovpn` (same cert)
 - `easy-rsa/` — PKI working dir (`pki/` is gitignored), plus `vars` and
@@ -118,8 +119,9 @@ Defaults push `redirect-gateway def1 bypass-dhcp`. `LAN_ROUTE` and
 `DNS` are omitted unless set in `config.mk`. When `DNS` is set, the
 server also pushes `block-outside-dns` (Windows leak; no-op on
 Linux/Android if the client has `ignore-unknown-option`). Data cipher is
-the OpenVPN 2.6 default (AES-GCM). Optional `CIPHER` sets
-`data-ciphers-fallback` for old clients. `tls-version-min 1.2`. `dh none`
+the OpenVPN 2.6 default (AES-GCM); the confs do not set `cipher` or
+`data-ciphers`. TLS 1.2 is the OpenVPN 2.6
+minimum (not set in the conf). `dh none`
 (ECDHE; no `gen-dh`). `tls-crypt` (no `tls-auth` / `key-direction`).
 `crl-verify crl.pem` (`0644` in `DEST`; `make revoke CLIENT=name` then
 `sudo make deploy`). UDP has `explicit-exit-notify`. Both have
@@ -144,11 +146,11 @@ by hand if you still need those assignments. Do not use the legacy
 (`/etc/openvpn/%i.conf`). TCP `port-share` still logs non-OpenVPN
 accepts at verb 1; that is expected, not a VPN client.
 
-The client remote defaults to `SERVER_CN`
-(`example.com`). UDP profiles use `UDP_PORT` (`1194`);
+The client `remote` is `REMOTE`. UDP profiles use `UDP_PORT` (`1194`);
 TCP profiles use `TCP_PORT` (`443`). `verify-x509-name` uses
-`SERVER_CN`. Profiles are mode `0600` (they inline the client private
-key). Import one `.ovpn` per device in OpenVPN Connect. Do not
+`SERVER_CN` (same as `REMOTE` unless you set both). Profiles are mode `0600` (they inline the client private
+key). `resolv-retry` is omitted (OpenVPN default is infinite). Import one
+`.ovpn` per device in OpenVPN Connect. Do not
 run UDP and TCP profiles at the same time. UDP is the daily transport;
 TCP is only when UDP is blocked. Switching `tls-crypt` needs new
 profiles; old `tls-auth` `.ovpn` will not connect.
@@ -159,8 +161,8 @@ traffic through the tun.
 
 ## Make
 
-`DEST` defaults to `/etc/openvpn/server`. `SERVER_CN` defaults to
-`example.com`. `CLIENTS` defaults to `id -un` (or
+`DEST` defaults to `/etc/openvpn/server`. `REMOTE` has no default
+(set it in `config.mk`). `CLIENTS` defaults to `id -un` (or
 `SUDO_USER` if make is root). `EASYRSA` defaults to
 `/usr/share/easy-rsa/easyrsa` (`apt install easy-rsa`). Uncomment those
 in `config.mk` to override.
@@ -178,7 +180,7 @@ in `config.mk` to override.
   each name in `CLIENTS` (cert if missing; skipped if that proto is off)
 - `make client/name.ovpn` — UDP profile from `server-udp.conf`
 - `make client/name.tcp.ovpn` — same cert, TCP from `server-tcp.conf`
-- `make dryrun` — `diff -u` live confs against `DEST`
+- `make dryrun` — `all`, then `diff -u` live confs against `DEST`
 - `sudo make install-pki` — copy `ca.crt`, server cert/key,
   `tc.key`, and `crl.pem` to `DEST`. Does not copy the CA private key
   or `dh.pem`. Does not generate; fails if `make pki` has not been

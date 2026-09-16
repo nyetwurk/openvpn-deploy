@@ -8,4 +8,4 @@ __pycache__/
 easy-rsa/pki/
 server/
 client/
-/config.mk
+/site.conf

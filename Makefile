@@ -1,51 +1,40 @@
-SHELL := /bin/bash
-# Site settings: cp examples/config.mk config.mk
+# Copyright (C) 2026 Nye Liu
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
--include config.mk
+SHELL := /bin/bash
 
 DEST ?= /etc/openvpn/server
-# REMOTE is required (hostname clients dial). No example.com default.
-ifeq ($(strip $(REMOTE)),)
-$(error REMOTE is required; set it in config.mk)
-endif
-ifeq ($(REMOTE),example.com)
-$(error REMOTE=example.com is not allowed; set a real hostname in config.mk)
-endif
-# Cert CN / verify-x509-name. Follows REMOTE unless set.
-SERVER_CN ?= $(REMOTE)
-# login that owns the process (SUDO_USER if uid 0)
-CLIENTS ?= $(shell test "$$(id -u)" -eq 0 && printf '%s\n' "$${SUDO_USER:-$$(id -un)}" || id -un)
 OPENVPN ?= /usr/sbin/openvpn
 EASYRSA ?= /usr/share/easy-rsa/easyrsa
-
-ENABLE_UDP ?= yes
-ENABLE_TCP ?= no
-UDP_PORT ?= 1194
-TCP_PORT ?= 443
-UDP_DEV ?= tun0
-TCP_DEV ?= tun1
-UDP_POOL ?= 10.8.19.0 255.255.255.0
-TCP_POOL ?= 10.8.20.0 255.255.255.0
-LAN_ROUTE ?=
-DNS ?=
-STATE_DIR ?= /var/lib/openvpn-server
-UDP_IPP ?= $(STATE_DIR)/ipp.txt
-TCP_IPP ?= $(STATE_DIR)/ipp-tcp.txt
-MSSFIX ?= 1360
-REDIRECT_GATEWAY ?= redirect-gateway def1 bypass-dhcp
-PORT_SHARE ?=
 CERT_DAYS ?= 3650
 
-export REMOTE
+SITE_CONF := site.conf
+VARS_MK := server/vars.mk
 
-# Listeners. ENABLE_*=yes includes that proto (udp / tcp).
-PROTOS := $(strip \
-	$(if $(filter yes,$(ENABLE_UDP)),udp) \
-	$(if $(filter yes,$(ENABLE_TCP)),tcp))
+$(VARS_MK): $(SITE_CONF) gen-config.py
+	./gen-config.py make-vars $@
+
+$(SITE_CONF):
+	./gen-config.py init-site
+
+include $(VARS_MK)
+
 CONFS := $(addprefix server/server-,$(addsuffix .conf,$(PROTOS)))
 UNITS := $(addprefix openvpn-server@server-,$(PROTOS))
 CLIENT_OVPNS := $(foreach p,$(PROTOS),$(addprefix client/,$(addsuffix $(if $(filter tcp,$(p)),.tcp).ovpn,$(CLIENTS))))
-IPP_FILES := $(foreach p,$(PROTOS),$(if $(filter tcp,$(p)),$(TCP_IPP),$(UDP_IPP)))
+NFT := $(if $(PROTOS),server/openvpn.nft)
 
 PKI := easy-rsa/pki
 SERIAL := $(PKI)/serial
@@ -60,13 +49,7 @@ NEED_USER := test "$$(id -u)" -ne 0 || { echo "generate PKI as non-root; run mak
 NEED_EASYRSA := test -x "$(EASYRSA)" || { echo "missing $(EASYRSA); apt install easy-rsa"; exit 1; }
 NEED_TUN := test -e /dev/net/tun && ( exec 7<>/dev/net/tun ) 2>/dev/null || { echo "TUN device missing; enable /dev/net/tun"; exit 1; }
 
-REDIRECT_GATEWAY_PUSH := $(if $(strip $(REDIRECT_GATEWAY)),push "$(REDIRECT_GATEWAY)")
-PORT_SHARE_LINE := $(if $(strip $(PORT_SHARE)),port-share $(PORT_SHARE))
-LAN_ROUTE_PUSH := $(if $(strip $(LAN_ROUTE)),push "route $(LAN_ROUTE)")
-DNS_PUSH := $(if $(strip $(DNS)),push "dhcp-option DNS $(DNS)")
-BLOCK_OUTSIDE_DNS_PUSH := $(if $(strip $(DNS)),push "block-outside-dns")
-
-CONF_DEPS := server.conf.in gen-config.py Makefile $(wildcard config.mk)
+CONF_DEPS := server.conf.in gen-config.py $(SITE_CONF)
 
 .DEFAULT_GOAL := all
 .PHONY: all confs pki pki-clean clean distclean clients dryrun deploy install-pki revoke
@@ -74,41 +57,24 @@ CONF_DEPS := server.conf.in gen-config.py Makefile $(wildcard config.mk)
 
 all: confs pki clients
 
-confs: $(CONFS)
-
-# $(call emit_conf,proto,port,dev,pool,ipp,port_share,exit_notify)
-define emit_conf
-	mkdir -p "$(dir $@)"
-	SERVER_CN='$(SERVER_CN)' \
-	PROTO='$(1)' PORT='$(2)' DEV='$(3)' POOL='$(4)' IPP='$(5)' \
-	PORT_SHARE='$(6)' EXIT_NOTIFY='$(7)' \
-	LAN_ROUTE_PUSH='$(LAN_ROUTE_PUSH)' \
-	DNS_PUSH='$(DNS_PUSH)' \
-	BLOCK_OUTSIDE_DNS_PUSH='$(BLOCK_OUTSIDE_DNS_PUSH)' \
-	MSSFIX='$(MSSFIX)' \
-	REDIRECT_GATEWAY_PUSH='$(REDIRECT_GATEWAY_PUSH)' \
-	./gen-config.py server > $@.tmp
-	mv $@.tmp $@
-endef
+confs: $(CONFS) $(NFT)
 
 clean:
 	rm -rf client
-	rm -f server/server-*.conf server/openvpn.nft server/*.tmp
+	rm -f server/server-*.conf server/openvpn.nft server/vars.mk server/*.tmp
 
 distclean pki-clean: clean
 	rm -rf server $(PKI)
-
-pki-clean: distclean
 
 pki: $(CA_CRT) $(SERVER_CRT) $(TC_KEY) $(CRL)
 
 clients: $(CLIENT_OVPNS)
 
-server/server-udp.conf: $(CONF_DEPS)
-	$(call emit_conf,udp,$(UDP_PORT),$(UDP_DEV),$(UDP_POOL),$(UDP_IPP),,explicit-exit-notify 1)
+server/server-%.conf: $(CONF_DEPS)
+	./gen-config.py server $* $@
 
-server/server-tcp.conf: $(CONF_DEPS)
-	$(call emit_conf,tcp,$(TCP_PORT),$(TCP_DEV),$(TCP_POOL),$(TCP_IPP),$(PORT_SHARE_LINE),)
+server/openvpn.nft: openvpn.nft.in gen-config.py $(SITE_CONF)
+	./gen-config.py nft $@
 
 $(SERIAL):
 	@$(NEED_USER)
@@ -143,18 +109,12 @@ $(PKI)/issued/%.crt $(PKI)/private/%.key &: $(CA_CRT)
 	cd easy-rsa && $(EASYRSA) --batch --days=$(CERT_DAYS) --nopass build-client-full "$*"
 
 client/%.ovpn: Makefile gen-config.py $(PKI)/issued/%.crt $(PKI)/private/%.key $(CA_CRT) $(TC_KEY) \
-		client.ovpn.in server/server-udp.conf $(wildcard config.mk)
-	mkdir -p "$(dir $@)"
-	./gen-config.py client "$(SERVER_CN)" "$*" server/server-udp.conf $@.tmp
-	mv $@.tmp $@
-	chmod 600 $@
+		client.ovpn.in server/server-udp.conf $(SITE_CONF)
+	./gen-config.py client "$(SERVER_CN)" "$*" server/server-udp.conf $@
 
 client/%.tcp.ovpn: Makefile gen-config.py $(PKI)/issued/%.crt $(PKI)/private/%.key $(CA_CRT) $(TC_KEY) \
-		client.ovpn.in server/server-tcp.conf $(wildcard config.mk)
-	mkdir -p "$(dir $@)"
-	./gen-config.py client "$(SERVER_CN)" "$*" server/server-tcp.conf $@.tmp
-	mv $@.tmp $@
-	chmod 600 $@
+		client.ovpn.in server/server-tcp.conf $(SITE_CONF)
+	./gen-config.py client "$(SERVER_CN)" "$*" server/server-tcp.conf $@
 
 revoke:
 	@$(NEED_USER)

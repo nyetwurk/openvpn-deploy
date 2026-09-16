@@ -1,11 +1,12 @@
 #!/usr/sbin/nft -f
 #
-# OpenVPN TUN forward + masquerade for this VPS (no LAN).
-# Not installed by `make deploy`. Copy to /etc/nftables.d/50-openvpn.nft
-# so `include "/etc/nftables.d/*.nft"` loads it after inet filter exists.
+# OpenVPN TUN forward + masquerade for a WAN-only VPS (no LAN).
+# Not installed by `make deploy`. Copy server/openvpn.nft to
+# /etc/nftables.d/openvpn.nft so `include "/etc/nftables.d/*.nft"`
+# loads it after inet filter exists.
 #   nft -f /etc/nftables.conf
 # Standalone (inet filter must already exist):
-#   nft -f /etc/nftables.d/50-openvpn.nft
+#   nft -f /etc/nftables.d/openvpn.nft
 #
 # inet filter forward is policy drop. Accept must be in THAT chain;
 # a drop there still wins. Do not add rule ip filter / ip nat —
@@ -17,12 +18,11 @@
 # (net.ipv4.ip_forward=1; sysctl, not nft).
 # This file does not punch input; rfc1918_drop still matches 10/8
 # on the host itself. Client → public net is forward + masquerade.
+# Do not use on the NAT router (that host uses ../nftables).
 
-define WAN_IF = eth0
-define VPN_IF = tun0
-define VPN_IPv4_NET = 10.8.19.0/24
-#define VPN_IF = { tun0, tun1 }
-#define VPN_IPv4_NET = { 10.8.19.0/24, 10.8.20.0/24 }
+define WAN_IF = @WAN_IF@
+define VPN_IF = @VPN_IF@
+define VPN_IPv4_NET = @VPN_IPV4_NET@
 
 # This chain is otherwise empty. Flush so a second nft -f does not
 # duplicate. Do not flush input (spam/rfc1918 live there).

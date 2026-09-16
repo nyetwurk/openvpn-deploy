@@ -108,8 +108,40 @@ def write_out(data: str, dest: Path | None, mode: int = 0o644) -> None:
     os.chmod(dest, mode)
 
 
-def optional_directive(text: str) -> str:
-    return text if text.strip() else ""
+def require_file(path: Path) -> Path:
+    if not path.is_file():
+        die(f"gen-config.py: missing {path}")
+    return path
+
+
+def subst_file(path: Path, mapping: dict[str, str]) -> str:
+    text = subst_text(require_file(path).read_text(), mapping, str(path))
+    if not text.endswith("\n"):
+        text += "\n"
+    return text
+
+
+def expect_argv(argv: list[str], usage_msg: str, min_n: int = 0, max_n: int = 0) -> None:
+    if not (min_n <= len(argv) <= max_n):
+        die(f"usage: gen-config.py {usage_msg}")
+
+
+def out_path(argv: list[str], index: int = 0, default: Path | None = None) -> Path | None:
+    return Path(argv[index]) if len(argv) > index else default
+
+
+def fill_empty(cfg: dict[str, str], key: str, value: str) -> None:
+    stripped = cfg[key].strip()
+    cfg[key] = stripped if stripped else value
+
+
+def if_set(value: str, text: str) -> str:
+    return text if value.strip() else ""
+
+
+def with_value(value: str, fmt: str) -> str:
+    value = value.strip()
+    return fmt.format(value) if value else ""
 
 
 def hostname_f() -> str:
@@ -161,30 +193,20 @@ def load_site() -> dict[str, str]:
     require_site_conf()
     cfg = dict(DEFAULTS)
     cfg.update(parse_site(SITE_CONF))
-    if not cfg["REMOTE"].strip():
-        cfg["REMOTE"] = hostname_f()
+    fill_empty(cfg, "REMOTE", hostname_f())
     if cfg["REMOTE"] == "example.com":
         die("gen-config.py: REMOTE=example.com is not allowed")
-    if not cfg["SERVER_CN"].strip():
-        cfg["SERVER_CN"] = cfg["REMOTE"]
-    state = cfg["STATE_DIR"].strip() or DEFAULTS["STATE_DIR"]
-    cfg["STATE_DIR"] = state
-    if not cfg["UDP_IPP"].strip():
-        cfg["UDP_IPP"] = f"{state}/ipp.txt"
-    if not cfg["TCP_IPP"].strip():
-        cfg["TCP_IPP"] = f"{state}/ipp-tcp.txt"
-    if not cfg["CLIENTS"].strip():
-        cfg["CLIENTS"] = login_name()
+    fill_empty(cfg, "SERVER_CN", cfg["REMOTE"])
+    fill_empty(cfg, "STATE_DIR", DEFAULTS["STATE_DIR"])
+    state = cfg["STATE_DIR"]
+    fill_empty(cfg, "UDP_IPP", f"{state}/ipp.txt")
+    fill_empty(cfg, "TCP_IPP", f"{state}/ipp-tcp.txt")
+    fill_empty(cfg, "CLIENTS", login_name())
     return cfg
 
 
 def enabled_protos(cfg: dict[str, str]) -> list[str]:
-    protos: list[str] = []
-    if cfg["ENABLE_UDP"] == "yes":
-        protos.append("udp")
-    if cfg["ENABLE_TCP"] == "yes":
-        protos.append("tcp")
-    return protos
+    return [p for p in ("udp", "tcp") if cfg[f"ENABLE_{p.upper()}"] == "yes"]
 
 
 def proto_val(cfg: dict[str, str], proto: str, name: str) -> str:
@@ -207,10 +229,8 @@ def nft_set(items: list[str]) -> str:
 
 
 def server_mapping(cfg: dict[str, str], proto: str) -> dict[str, str]:
-    dns = cfg["DNS"].strip()
-    lan = cfg["LAN_ROUTE"].strip()
-    redirect = cfg["REDIRECT_GATEWAY"].strip()
-    port_share = cfg["PORT_SHARE"].strip() if proto == "tcp" else ""
+    dns = cfg["DNS"]
+    port_share = cfg["PORT_SHARE"] if proto == "tcp" else ""
     return {
         "SERVER_CN": cfg["SERVER_CN"],
         "PROTO": proto,
@@ -219,12 +239,12 @@ def server_mapping(cfg: dict[str, str], proto: str) -> dict[str, str]:
         "POOL": proto_val(cfg, proto, "POOL"),
         "IPP": proto_val(cfg, proto, "IPP"),
         "MSSFIX": cfg["MSSFIX"],
-        "PORT_SHARE": optional_directive(f"port-share {port_share}" if port_share else ""),
+        "PORT_SHARE": with_value(port_share, "port-share {}"),
         "EXIT_NOTIFY": "explicit-exit-notify 1" if proto == "udp" else "",
-        "REDIRECT_GATEWAY_PUSH": optional_directive(f'push "{redirect}"' if redirect else ""),
-        "LAN_ROUTE_PUSH": optional_directive(f'push "route {lan}"' if lan else ""),
-        "DNS_PUSH": optional_directive(f'push "dhcp-option DNS {dns}"' if dns else ""),
-        "BLOCK_OUTSIDE_DNS_PUSH": optional_directive('push "block-outside-dns"' if dns else ""),
+        "REDIRECT_GATEWAY_PUSH": with_value(cfg["REDIRECT_GATEWAY"], 'push "{}"'),
+        "LAN_ROUTE_PUSH": with_value(cfg["LAN_ROUTE"], 'push "route {}"'),
+        "DNS_PUSH": with_value(dns, 'push "dhcp-option DNS {}"'),
+        "BLOCK_OUTSIDE_DNS_PUSH": if_set(dns, 'push "block-outside-dns"'),
     }
 
 
@@ -242,28 +262,20 @@ def nft_mapping(cfg: dict[str, str]) -> dict[str, str]:
 
 
 def emit_template(path: Path, mapping: dict[str, str], dest: Path | None, mode: int = 0o644) -> None:
-    if not path.is_file():
-        die(f"gen-config.py: missing {path}")
-    write_out(subst_text(path.read_text(), mapping, str(path)), dest, mode)
+    write_out(subst_file(path, mapping), dest, mode)
 
 
 def cmd_init_site(argv: list[str]) -> None:
-    if argv:
-        die("usage: gen-config.py init-site")
+    expect_argv(argv, "init-site")
     require_site_conf()
 
 
 def cmd_make_vars(argv: list[str]) -> None:
-    if len(argv) > 1:
-        die("usage: gen-config.py make-vars [OUT]")
-    dest = Path(argv[0]) if argv else Path("server/vars.mk")
+    expect_argv(argv, "make-vars [OUT]", max_n=1)
+    dest = out_path(argv, default=Path("server/vars.mk"))
     cfg = load_site()
     protos = enabled_protos(cfg)
-    ipps: list[str] = []
-    if "udp" in protos:
-        ipps.append(cfg["UDP_IPP"])
-    if "tcp" in protos:
-        ipps.append(cfg["TCP_IPP"])
+    ipps = [proto_val(cfg, p, "IPP") for p in protos]
     write_out(
         "# Generated from site.conf. Do not edit.\n"
         f"REMOTE := {cfg['REMOTE']}\n"
@@ -276,21 +288,16 @@ def cmd_make_vars(argv: list[str]) -> None:
 
 
 def cmd_server(argv: list[str]) -> None:
-    if not argv or argv[0] not in ("udp", "tcp"):
+    if not argv or argv[0] not in ("udp", "tcp") or len(argv) > 2:
         die("usage: gen-config.py server udp|tcp [OUT]")
-    if len(argv) > 2:
-        die("usage: gen-config.py server udp|tcp [OUT]")
-    dest = Path(argv[1]) if len(argv) > 1 else None
-    emit_template(Path("server.conf.in"), server_mapping(load_site(), argv[0]), dest)
+    emit_template(
+        Path("server.conf.in"), server_mapping(load_site(), argv[0]), out_path(argv, 1)
+    )
 
 
 def cmd_nft(argv: list[str]) -> None:
-    if len(argv) > 1:
-        die("usage: gen-config.py nft [OUT]")
-    dest = Path(argv[0]) if argv else None
-    emit_template(
-        Path("openvpn.nft.in"), nft_mapping(load_site()), dest, 0o755
-    )
+    expect_argv(argv, "nft [OUT]", max_n=1)
+    emit_template(Path("openvpn.nft.in"), nft_mapping(load_site()), out_path(argv), 0o755)
 
 
 def login_name() -> str:
@@ -323,55 +330,48 @@ def pem_block(path: Path, begin: str, end: str) -> str:
     return "\n".join(lines)
 
 
+def inline_block(tag: str, body: str) -> str:
+    return f"<{tag}>\n{body}\n</{tag}>\n"
+
+
+def pem_inline(tag: str, path: Path, begin: str, end: str) -> str:
+    return inline_block(tag, pem_block(path, begin, end))
+
+
+def pem_cert(tag: str, path: Path) -> str:
+    return pem_inline(tag, path, "BEGIN CERTIFICATE", "END CERTIFICATE")
+
+
 def cmd_client(argv: list[str]) -> None:
-    if not argv or not argv[0]:
+    expect_argv(argv, "client SERVER_CN [CLIENT [CONF [OUT]]]", min_n=1, max_n=4)
+    if not argv[0]:
         die("usage: gen-config.py client SERVER_CN [CLIENT [CONF [OUT]]]")
     server = argv[0]
     client = argv[1] if len(argv) > 1 else login_name()
-    conf = Path(argv[2] if len(argv) > 2 else "server/server-udp.conf")
-    dest = Path(argv[3]) if len(argv) > 3 else Path(f"client/{client}.ovpn")
-    remote = load_site()["REMOTE"]
-
-    if not conf.is_file():
-        die(f"gen-config.py client: missing {conf}")
-
-    port = conf_field(conf, "port", "1194")
-    proto = conf_field(conf, "proto", "udp")
-    mssfix = conf_field(conf, "mssfix", "1360")
-    print(f"got {conf} {port} {proto} -> {dest}", file=sys.stderr)
-
+    conf = require_file(out_path(argv, 2, Path("server/server-udp.conf")))
+    dest = out_path(argv, 3, Path(f"client/{client}.ovpn"))
     mapping = {
-        "REMOTE": remote,
+        "REMOTE": load_site()["REMOTE"],
         "SERVER": server,
-        "PORT": port,
-        "PROTO": proto,
-        "MSSFIX": mssfix,
+        "PORT": conf_field(conf, "port", "1194"),
+        "PROTO": conf_field(conf, "proto", "udp"),
+        "MSSFIX": conf_field(conf, "mssfix", "1360"),
     }
-    body = subst_text(Path("client.ovpn.in").read_text(), mapping, "client.ovpn.in")
-    if not body.endswith("\n"):
-        body += "\n"
-    data = (
-        body
-        + "<ca>\n"
-        + pem_block(Path("easy-rsa/pki/ca.crt"), "BEGIN CERTIFICATE", "END CERTIFICATE")
-        + "\n</ca>\n"
-        + "<cert>\n"
-        + pem_block(
-            Path(f"easy-rsa/pki/issued/{client}.crt"),
-            "BEGIN CERTIFICATE",
-            "END CERTIFICATE",
-        )
-        + "\n</cert>\n"
-        + "<key>\n"
-        + pem_block(
-            Path(f"easy-rsa/pki/private/{client}.key"),
-            "BEGIN PRIVATE KEY",
-            "END PRIVATE KEY",
-        )
-        + "\n</key>\n"
-        + "<tls-crypt>\n"
-        + pem_block(Path("server/tc.key"), "BEGIN OpenVPN Static key V1", "END OpenVPN Static key V1")
-        + "\n</tls-crypt>\n"
+    pki = Path("easy-rsa/pki")
+    data = subst_file(Path("client.ovpn.in"), mapping) + "".join(
+        [
+            pem_cert("ca", pki / "ca.crt"),
+            pem_cert("cert", pki / "issued" / f"{client}.crt"),
+            pem_inline(
+                "key", pki / "private" / f"{client}.key", "BEGIN PRIVATE KEY", "END PRIVATE KEY"
+            ),
+            pem_inline(
+                "tls-crypt",
+                Path("server/tc.key"),
+                "BEGIN OpenVPN Static key V1",
+                "END OpenVPN Static key V1",
+            ),
+        ]
     )
     write_out(data, dest, 0o600)
 
@@ -390,18 +390,10 @@ def main() -> None:
     if len(sys.argv) < 2:
         usage()
     cmd, rest = sys.argv[1], sys.argv[2:]
-    if cmd == "init-site":
-        cmd_init_site(rest)
-    elif cmd == "make-vars":
-        cmd_make_vars(rest)
-    elif cmd == "server":
-        cmd_server(rest)
-    elif cmd == "nft":
-        cmd_nft(rest)
-    elif cmd == "client":
-        cmd_client(rest)
-    else:
+    fn = globals().get(f"cmd_{cmd.replace('-', '_')}")
+    if not callable(fn):
         die(f"gen-config.py: unknown command {cmd}")
+    fn(rest)
 
 
 if __name__ == "__main__":

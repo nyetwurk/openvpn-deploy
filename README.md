@@ -1,9 +1,10 @@
 # openvpn-deploy
 
-openvpn-deploy builds and deploys Debian OpenVPN TUN servers from a small
-`site.conf`. It installs `openvpn-server@` systemd units, certificates, and `.ovpn`
-profiles you can import into OpenVPN Connect (in Android, `import` is misnamed
-`upload`). Files go in `/etc/openvpn/server`.
+Simple OpenVPN for road warriors: stand up a TUN on a Debian VPS and
+get client profiles to take on the road. It installs
+`openvpn-server@` systemd units, certificates, and `.ovpn` profiles
+you import in OpenVPN Connect (in Android, *Import* is misnamed
+**Upload**). Files go in `/etc/openvpn/server`.
 
 It is for two Debian environments:
 
@@ -18,36 +19,10 @@ is blocked, and can share that port with a local HTTPS daemon.
 Clients get a full tunnel by default, an optional LAN route and DNS,
 and a `tls-crypt` key. Client IPv6 is blocked.
 
-## Packages
-
-```sh
-apt install make python3 easy-rsa openvpn
-```
-
-If you use the optional Debian nftables snippet, install `nftables`.
-
-## Quickstart
-
-- Run `make`. If `site.conf` is missing, it is created with `REMOTE`
-  from `hostname -f` and `make` stops.
-- Edit `site.conf` (hostname, LAN, DNS, TCP, `PORT_SHARE` as needed).
-  Copy individual options from `examples/site.conf` into `site.conf`.
-  Do not `cp examples/site.conf site.conf` (that file is all
-  comments; you would lose `REMOTE`).
-- Run `make` again. That builds certificates, server configs, and
-  `client/$USER.ovpn`.
-- Put settings in `site.conf`, not on the `make` command line.
-  Set `CLIENTS` there for more than one profile (space-separated).
-- `sudo make deploy`. Enable `openvpn-server@server-udp`. Enable
-  `openvpn-server@server-tcp` only if `ENABLE_TCP=yes`.
-
-> [!WARNING]
-> Deploy writes `/etc/openvpn/server` and can break other OpenVPN
-> units that share that directory or those unit names.
-
-- Import `client/*.ovpn` in OpenVPN Connect. On Android the file
-  action is labeled **Upload**; that means import the profile onto the
-  phone, not send it to a server.
+Command sequence, packages, and Debian nftables:
+[QUICKSTART-VPS.md](QUICKSTART-VPS.md). On a NAT router skip the
+nftables and sysctl steps; `make`, edit `site.conf`, `make`,
+`sudo make deploy`.
 
 ## Configuration
 
@@ -106,10 +81,8 @@ and last already. Still allow the TUN path if you change `UDP_DEV` /
 `TCP_DEV` or the pools.
 
 A WAN-only VPS has no LAN masquerade. Implement the policy in
-whatever you run (nftables, iptables, ufw, firewalld). openvpn-deploy
-ships an optional Debian nftables fragment (`server/openvpn.nft`
-after `make`, plus `examples/99-openvpn-forward.conf`). Copy those
-only if the host already uses nftables (`/etc/nftables.d/`).
+whatever you run (nftables, iptables, ufw, firewalld). Debian
+nftables: [QUICKSTART-VPS.md](QUICKSTART-VPS.md).
 
 > [!WARNING]
 > `server/openvpn.nft` flushes `inet filter forward`. Do not install

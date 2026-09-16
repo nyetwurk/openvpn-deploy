@@ -1,7 +1,8 @@
 # Development
 
-Internals for openvpn-deploy. Operator docs: [README.md](README.md).
-This file is for changing templates, `gen-config.py`, or the Makefile.
+Internals for openvpn-deploy. Operator docs: [README.md](README.md),
+[QUICKSTART-VPS.md](QUICKSTART-VPS.md). This file is for changing
+templates, `gen-config.py`, or the Makefile.
 
 ## Split
 
@@ -90,9 +91,10 @@ Do not use `openvpn@` (`/etc/openvpn/%i.conf`). Use
   vendor `vars` or `openssl-easyrsa.cnf`.
 - `sudo make install-pki` copies CA cert, server cert/key, `tc.key`,
   CRL. Not the CA private key. Fails if `/dev/net/tun` is missing.
-- `sudo make deploy` does not install `server.conf`, nft, sysctl, or
-  LimitNPROC drop-ins. Does not enable units.
-- `server.conf` in the repo is the Debian sample. Not a unit.
+- `sudo make deploy` does not install nft, sysctl, or LimitNPROC
+  drop-ins. Does not enable units. Does not install the Debian
+  `server.conf` sample.
+- `server.conf-dist` in the repo is the Debian sample. Not a unit.
 
 Debian `openvpn-server@.service` sets `LimitNPROC`. That can fail in
 a VM (`systemd-detect-virt`). Drop-in

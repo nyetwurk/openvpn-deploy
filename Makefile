@@ -79,6 +79,7 @@ server/openvpn.nft: openvpn.nft.in gen-config.py $(SITE_CONF)
 $(SERIAL):
 	@$(NEED_USER)
 	@$(NEED_EASYRSA)
+	mkdir -p easy-rsa
 	cd easy-rsa && $(EASYRSA) --batch init-pki
 
 $(CA_CRT) $(CA_KEY) &: | $(SERIAL)

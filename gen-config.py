@@ -288,7 +288,9 @@ def cmd_nft(argv: list[str]) -> None:
     if len(argv) > 1:
         die("usage: gen-config.py nft [OUT]")
     dest = Path(argv[0]) if argv else None
-    emit_template(Path("openvpn.nft.in"), nft_mapping(load_site()), dest)
+    emit_template(
+        Path("openvpn.nft.in"), nft_mapping(load_site()), dest, 0o755
+    )
 
 
 def login_name() -> str:

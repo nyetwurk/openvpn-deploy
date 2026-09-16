@@ -45,8 +45,8 @@ generated files under `server/` or `client/`.
 - `client.ovpn.in` — `@SERVER@` `@REMOTE@` `@PORT@` `@PROTO@`
   `@MSSFIX@`. Client writes mode `0600` (create empty, then write).
 - `openvpn.nft.in` — WAN-only fragment. Enabled tuns and pools become
-  nft sets. Not installed. Do not use on the NAT router
-  (`../nftables`).
+  nft sets. Generated `server/openvpn.nft` is `0755` (`#!/usr/sbin/nft
+  -f`). Not installed. Do not use on the NAT router (`../nftables`).
 
 `mssfix` is on both protos (shared template). It only matters for
 `proto udp`. Do not add `fragment` (OpenVPN Connect on Android trips
@@ -85,7 +85,9 @@ Do not use `openvpn@` (`/etc/openvpn/%i.conf`). Use
 ## Make notes
 
 - `make pki` refuses root. Does not run `gen-dh`. `CERT_DAYS` (3650)
-  applies to new certs only.
+  applies to new certs only. Easy-RSA files come from the Debian
+  `easy-rsa` package (`--batch --nopass --days`). This repo does not
+  vendor `vars` or `openssl-easyrsa.cnf`.
 - `sudo make install-pki` copies CA cert, server cert/key, `tc.key`,
   CRL. Not the CA private key. Fails if `/dev/net/tun` is missing.
 - `sudo make deploy` does not install `server.conf`, nft, sysctl, or

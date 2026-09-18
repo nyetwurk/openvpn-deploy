@@ -1,35 +1,44 @@
 # openvpn-deploy
 
-Simple OpenVPN for road warriors: stand up a TUN on a Debian VPS and
-get client profiles to take on the road. It installs
-`openvpn-server@` systemd units, certificates, and `.ovpn` profiles
-you import in OpenVPN Connect (in Android, *Import* is misnamed
-**Upload**). Files go in `/etc/openvpn/server`.
+Deploys OpenVPN for road warriors: stands up a TUN on a Debian VPS and mints
+`.ovpn` profiles. This tool installs `openvpn-server@` systemd units and
+certificates. Live server endpoint configurations go in `/etc/openvpn/server`.
 
-It is for two Debian environments:
+`openvpn-deploy` is for two Debian environments:
 
 - A WAN-only VPS with no LAN (you must forward and masquerade the
   VPN subnet yourself; this tool can emit a Debian nftables snippet.
-  `make deploy` does not install firewall or sysctl files)
+  `make deploy` does not install firewall or sysctl files. See
+  [QUICKSTART-VPS.md](QUICKSTART-VPS.md).
 - An existing NAT router that already masquerades a LAN (keep that host’s
   existing firewall)
 
-UDP is the recommended tunnel. TCP on 443 is an optional fallback when UDP
-is blocked, and can share that port with a local HTTPS daemon.
-Clients get a full tunnel by default, an optional LAN route and DNS,
-and a `tls-crypt` key. Client IPv6 is blocked.
+UDP is the recommended tunnel. TCP on 443 is an optional fallback when UDP is
+blocked. OpenVPN server listeners can share that port with a local HTTPS daemon
+by listening on 443 and forwarding non-OpenVPN traffic to that daemon on a
+different port.
 
-Command sequence, packages, and Debian nftables:
-[QUICKSTART-VPS.md](QUICKSTART-VPS.md). On a NAT router skip the
-nftables and sysctl steps; `make`, edit `site.conf`, `make`,
-`sudo make deploy`.
+Clients get a full tunnel by default, an optional LAN route and optional DNS
+pushed to them, and a symmetric, shared `tls-crypt` key. Client IPv6 is blocked.
 
 ## Configuration
 
-The first `make` creates `site.conf` with `REMOTE` from
-`hostname -f` and stops. Add only the options you need from
-`examples/site.conf`. Do not copy that catalog over `site.conf`.
-`REMOTE=example.com` is rejected.
+Run `make` to create an initial site configuration if one does not exist yet.
+The first `make` writes `site.conf` with `REMOTE` from `hostname -f` and stops.
+
+Edit `site.conf` to your needs.
+
+The initial auto-generated `site.conf` will contain `REMOTE` from `hostname -f`
+and nothing else. Add only the options you need from `examples/site.conf`. Do
+not copy that catalog over `site.conf` (every line there is commented; you
+would lose `REMOTE`).
+
+Run `make` again to create OpenVPN server configuration(s) and client profile(s)
+from `site.conf`. If `CLIENTS` is not set, it will default to creating profiles
+for your current login name.
+
+`REMOTE=example.com` is rejected (that placeholder is not a real remote).
+Omitting `REMOTE` uses `hostname -f`.
 
 | Variable | Role |
 | --- | --- |
@@ -58,15 +67,36 @@ again.
 
 ## Clients
 
-Each `.ovpn` contains that device’s private key (`0600`). Import one
-profile per device. Do not run the UDP and TCP profiles at the same
-time. Use UDP unless UDP is blocked.
+Each `.ovpn` contains that client’s private key (`0600`). One profile per
+device. Do not run the UDP and TCP profiles at the same time on the same
+device.
+
+Generally, only use TCP if UDP is blocked.
+
+Copy `client/*.ovpn` off the OpenVPN host to the client device(s). (e.g. `scp`
+to a laptop, USB, AirDrop, Nearby Share). Do not share the profile as “anyone
+with the link”, it contains sensitive keys. Avoid email if possible unless you
+are using a secure email service or PGP/GPG encrypted email.
+
+Import the profile to **OpenVPN Connect**. On mobile devices the import action
+is sometimes mislabeled **Upload**.
+
+[bootstash](https://github.com/nyetwurk/bootstash) is another way to transfer
+the profile to the client device. It is an HTTP/HTTPS cubby that combines
+Google OIDC with PAM. Once authenticated, the client can download the profile
+in a browser.
+
+If bootstash is on this host, `cp` into
+`/var/lib/bootstash/users/<linux-username>/`; `scp` when it is not.
+The client must reach that host *before* the tunnel is up. This
+Makefile does not install it. `PORT_SHARE` is for a local HTTPS daemon, not
+`.ovpn` files.
+
+## Firewall/Routing
 
 A LAN host that dials the WAN address hits this machine directly (no
 hairpin). With `LAN_ROUTE` set, other LAN destinations go through the
 tunnel.
-
-## Firewall
 
 `make deploy` does not install firewall rules. Clients need this
 policy on the OpenVPN host (any backend):
@@ -76,13 +106,14 @@ policy on the OpenVPN host (any backend):
 - Forward the VPN subnet out the WAN
 - Masquerade the VPN subnet out the WAN
 
-A NAT router that already masquerades a LAN usually has the first
-and last already. Still allow the TUN path if you change `UDP_DEV` /
-`TCP_DEV` or the pools.
+A WAN-only VPS usually has no existing LAN masquerade. Implement the policy in
+whatever you run (nftables, iptables, ufw, firewalld). If you are using Debian
+and nftables, also see [QUICKSTART-VPS.md](QUICKSTART-VPS.md).
 
-A WAN-only VPS has no LAN masquerade. Implement the policy in
-whatever you run (nftables, iptables, ufw, firewalld). Debian
-nftables: [QUICKSTART-VPS.md](QUICKSTART-VPS.md).
+An existing NAT router that already masquerades a LAN usually has forwarding and
+subnet masquerading already configured via `sysctl` and `iptables/nftables`
+respectively. You will only need to add the TUN subnet as if it were just
+another LAN subnet.
 
 > [!WARNING]
 > `server/openvpn.nft` flushes `inet filter forward`. Do not install
@@ -90,12 +121,12 @@ nftables: [QUICKSTART-VPS.md](QUICKSTART-VPS.md).
 > next to iptables-nft `ip filter` / `ip nat` on a Debian host whose
 > `nftables.conf` deletes those tables.
 
-iptables (and other) emitters are not included. They may be added
+`iptables`, `ipfw`, and other emitters are not included. They may be added
 later.
 
 If the unit fails to start in a VM or container, add a systemd
-drop-in with `[Service]` / `LimitNPROC=infinity`. `make deploy`
-does not install it.
+drop-in with `[Service]` / `LimitNPROC=infinity`. `make deploy` will not
+install one for you.
 
 ## Commands
 

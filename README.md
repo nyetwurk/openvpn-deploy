@@ -8,11 +8,11 @@ you import in OpenVPN Connect (in Android, *Import* is misnamed
 
 It is for two Debian environments:
 
-- A NAT router that already masquerades a LAN (keep that host’s
-  existing firewall; on one common layout that is `../nftables`)
 - A WAN-only VPS with no LAN (you must forward and masquerade the
   VPN subnet yourself; this tool can emit a Debian nftables snippet.
-  `make deploy` does not install a firewall)
+  `make deploy` does not install firewall or sysctl files)
+- An existing NAT router that already masquerades a LAN (keep that host’s
+  existing firewall)
 
 UDP is the recommended tunnel. TCP on 443 is an optional fallback when UDP
 is blocked, and can share that port with a local HTTPS daemon.

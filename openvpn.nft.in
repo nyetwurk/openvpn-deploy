@@ -18,7 +18,7 @@
 # (net.ipv4.ip_forward=1; sysctl, not nft).
 # This file does not punch input; rfc1918_drop still matches 10/8
 # on the host itself. Client → public net is forward + masquerade.
-# Do not use on the NAT router (that host uses ../nftables).
+# Do not use on a NAT router that already has other forward rules.
 
 define WAN_IF = @WAN_IF@
 define VPN_IF = @VPN_IF@

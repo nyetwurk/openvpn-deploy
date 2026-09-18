@@ -1,7 +1,7 @@
 # WAN-only VPS quickstart
 
-Debian VPS with no LAN. Skip this file on a NAT router that already
-masquerades a LAN (`../nftables`).
+This guide is for a Debian VPS with no LAN. It is not for a NAT router
+that already masquerades a LAN.
 
 What the tool is, `site.conf` options, and Make targets:
 [README.md](README.md).
@@ -38,7 +38,7 @@ sudo systemctl enable --now nftables
 # /etc/nftables.conf only if that file does not already include
 # "/etc/nftables.d/*.nft". If the current nftables.conf has host
 # rules, move them into /etc/nftables.d/ first (e.g. 10-host.nft).
-# Do not use on the NAT router (../nftables).
+# Do not use on a NAT router that already has forward/NAT rules.
 # Include is an absolute path so `nft -f /etc/nftables.conf` works
 # from any cwd. The glob is not recursive.
 

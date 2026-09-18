@@ -47,7 +47,8 @@ generated files under `server/` or `client/`.
   `@MSSFIX@`. Client writes mode `0600` (create empty, then write).
 - `openvpn.nft.in` — WAN-only fragment. Enabled tuns and pools become
   nft sets. Generated `server/openvpn.nft` is `0755` (`#!/usr/sbin/nft
-  -f`). Not installed. Do not use on the NAT router (`../nftables`).
+  -f`). Not installed. Do not use on a NAT router that already has
+  forward rules.
 
 `mssfix` is on both protos (shared template). It only matters for
 `proto udp`. Do not add `fragment` (OpenVPN Connect on Android trips
@@ -102,8 +103,8 @@ a VM (`systemd-detect-virt`). Drop-in
 
 ## Firewall notes
 
-`make deploy` must not install nft. The NAT router TUN policy is
-`../nftables`. Do not copy that tree to a WAN-only VPS. The generated
+`make deploy` must not install nft. A NAT router keeps its existing
+firewall; do not install `server/openvpn.nft` there. The generated
 `server/openvpn.nft` flushes `inet filter forward` (assumes that chain
 is otherwise empty). Do not flush `input`. Do not add `ip filter` /
 `ip nat` rules (`nftables.conf` deletes those leftover tables).

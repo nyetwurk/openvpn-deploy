@@ -51,8 +51,12 @@ NEED_TUN := test -e /dev/net/tun && ( exec 7<>/dev/net/tun ) 2>/dev/null || { ec
 
 CONF_DEPS := server.conf.in gen-config.py $(SITE_CONF)
 
+# Optional CLI path. Not a site.conf key. Empty = search PATH, then
+# /usr/sbin/bootstash, then /usr/local/sbin/bootstash.
+BOOTSTASH_CLI ?=
+
 .DEFAULT_GOAL := all
-.PHONY: all confs pki pki-clean clean distclean clients dryrun deploy install-pki revoke
+.PHONY: all confs pki pki-clean clean distclean clients maybe-bootstash bootstash dryrun deploy install-pki revoke
 .SECONDARY:
 
 all: confs pki clients
@@ -69,6 +73,36 @@ distclean pki-clean: clean
 pki: $(CA_CRT) $(SERVER_CRT) $(TC_KEY) $(CRL)
 
 clients: $(CLIENT_OVPNS)
+	@$(if $(filter no,$(BOOTSTASH)),:,$(MAKE) --no-print-directory maybe-bootstash)
+
+# BOOTSTASH=auto (default): put when the CLI exists. Failures stay in client/.
+# BOOTSTASH=no: skip. make bootstash requires a successful put.
+maybe-bootstash:
+	@cli="$(BOOTSTASH_CLI)"; \
+	if [ -z "$$cli" ]; then \
+		cli=$$({ command -v bootstash 2>/dev/null && exit 0; \
+			test -x /usr/sbin/bootstash && echo /usr/sbin/bootstash && exit 0; \
+			test -x /usr/local/sbin/bootstash && echo /usr/local/sbin/bootstash; }); \
+	fi; \
+	if [ -z "$$cli" ] || [ -z "$(CLIENT_OVPNS)" ]; then \
+		exit 0; \
+	fi; \
+	$(NEED_USER); \
+	echo "$$cli put -t . $(CLIENT_OVPNS)"; \
+	$$cli put -t . $(CLIENT_OVPNS) || echo "bootstash put failed; profiles remain in client/"
+
+bootstash: $(CLIENT_OVPNS)
+	@$(NEED_USER)
+	@cli="$(BOOTSTASH_CLI)"; \
+	if [ -z "$$cli" ]; then \
+		cli=$$({ command -v bootstash 2>/dev/null && exit 0; \
+			test -x /usr/sbin/bootstash && echo /usr/sbin/bootstash && exit 0; \
+			test -x /usr/local/sbin/bootstash && echo /usr/local/sbin/bootstash; }); \
+	fi; \
+	test -n "$$cli" || { echo "bootstash CLI not found (PATH, /usr/sbin, /usr/local/sbin)"; exit 1; }; \
+	test -n "$(CLIENT_OVPNS)" || { echo "no client profiles"; exit 1; }; \
+	echo "$$cli put -t . $(CLIENT_OVPNS)"; \
+	$$cli put -t . $(CLIENT_OVPNS)
 
 server/server-%.conf: $(CONF_DEPS)
 	./gen-config.py server $* $@

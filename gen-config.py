@@ -52,6 +52,7 @@ DEFAULTS = {
     "PORT_SHARE": "",
     "WAN_IF": "eth0",
     "CLIENTS": "",
+    "BOOTSTASH": "auto",
 }
 
 
@@ -202,6 +203,9 @@ def load_site() -> dict[str, str]:
     fill_empty(cfg, "UDP_IPP", f"{state}/ipp.txt")
     fill_empty(cfg, "TCP_IPP", f"{state}/ipp-tcp.txt")
     fill_empty(cfg, "CLIENTS", login_name())
+    fill_empty(cfg, "BOOTSTASH", DEFAULTS["BOOTSTASH"])
+    if cfg["BOOTSTASH"] not in ("auto", "no"):
+        die("gen-config.py: BOOTSTASH must be auto or no")
     return cfg
 
 
@@ -282,7 +286,8 @@ def cmd_make_vars(argv: list[str]) -> None:
         f"SERVER_CN := {cfg['SERVER_CN']}\n"
         f"PROTOS := {' '.join(protos)}\n"
         f"IPP_FILES := {' '.join(ipps)}\n"
-        f"CLIENTS := {cfg['CLIENTS']}\n",
+        f"CLIENTS := {cfg['CLIENTS']}\n"
+        f"BOOTSTASH := {cfg['BOOTSTASH']}\n",
         dest,
     )
 

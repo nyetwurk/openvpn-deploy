@@ -15,6 +15,8 @@ sudo apt install make python3 easy-rsa openvpn nftables
 make
 ```
 
+That writes `site.conf` with `REMOTE` from `hostname -f` and stops.
+
 - Edit `site.conf` to your needs.
 - Set `WAN_IF` if the WAN is not `eth0`.
 
@@ -51,8 +53,9 @@ sudo systemctl enable --now nftables
 
 ## Build server confs, certificates, profiles, and OpenVPN nft fragment
 
-The next `make` builds server confs, certificates,
-profiles, and `server/openvpn.nft`.
+The next `make` builds server confs, certificates, profiles, and
+`server/openvpn.nft`. `BOOTSTASH=auto` (the default) also runs
+`bootstash put` when the CLI is on this host.
 
 ```sh
 make
@@ -72,7 +75,6 @@ sudo /etc/nftables.d/openvpn.nft
 ```sh
 sudo make deploy
 sudo systemctl enable --now openvpn-server@server-udp
-sudo systemctl enable --now openvpn-server@server-tcp
 ```
 
 Enable `openvpn-server@server-tcp` only if `ENABLE_TCP=yes`.
@@ -82,7 +84,6 @@ Enable `openvpn-server@server-tcp` only if `ENABLE_TCP=yes`.
 > `/etc/openvpn/server` and can break other OpenVPN units that share
 > that directory or those unit names.
 
-`scp` `client/*.ovpn` off this VPS, or `cp` into local
-[bootstash](https://github.com/nyetwurk/bootstash) /
-`scp` to a remote one. Profiles:
+`scp` `client/*.ovpn` off this VPS if you did not use local
+[bootstash](https://github.com/nyetwurk/bootstash). Profiles:
 [README.md#clients](README.md#clients).

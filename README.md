@@ -1,8 +1,9 @@
 # openvpn-deploy
 
 Deploys OpenVPN for road warriors: stands up a TUN on a Debian VPS and mints
-`.ovpn` profiles. This tool installs `openvpn-server@` systemd units and
-certificates. Live server endpoint configurations go in `/etc/openvpn/server`.
+`.ovpn` profiles. `make` writes `openvpn-server@` configs and certificates;
+`sudo make deploy` copies them to `/etc/openvpn/server`. Enable the units
+yourself.
 
 `openvpn-deploy` is for two Debian environments:
 
@@ -23,22 +24,12 @@ pushed to them, and a symmetric, shared `tls-crypt` key. Client IPv6 is blocked.
 
 ## Configuration
 
-Run `make` to create an initial site configuration if one does not exist yet.
-The first `make` writes `site.conf` with `REMOTE` from `hostname -f` and stops.
-
-Edit `site.conf` to your needs.
-
-The initial auto-generated `site.conf` will contain `REMOTE` from `hostname -f`
-and nothing else. Add only the options you need from `examples/site.conf`. Do
-not copy that catalog over `site.conf` (every line there is commented; you
-would lose `REMOTE`).
-
-Run `make` again to create OpenVPN server configuration(s) and client profile(s)
-from `site.conf`. If `CLIENTS` is not set, it will default to creating profiles
-for your current login name.
-
-`REMOTE=example.com` is rejected (that placeholder is not a real remote).
-Omitting `REMOTE` uses `hostname -f`.
+The first `make` writes `site.conf` with `REMOTE` from `hostname -f` and
+stops. Add only the options you need from `examples/site.conf`. Do not
+copy that catalog over `site.conf` (every line there is commented; you
+would lose `REMOTE`). Then `make` again. Empty `CLIENTS` defaults to
+your login. `REMOTE=example.com` is rejected. Omitting `REMOTE` uses
+`hostname -f`.
 
 | Variable | Role |
 | --- | --- |
@@ -47,12 +38,13 @@ Omitting `REMOTE` uses `hostname -f`.
 | `ENABLE_UDP` / `ENABLE_TCP` | `yes` to build and restart that listener (TCP defaults to `no`) |
 | `UDP_PORT` / `TCP_PORT` | Listen ports (`1194` / `443`) |
 | `UDP_DEV` / `TCP_DEV` | TUN devices (`tun0` / `tun1`) |
-| `UDP_POOL` / `TCP_POOL` | VPN address ranges. Defaults: `10.8.19.0/24` UDP, `10.8.20.0/24` TCP |
+| `UDP_POOL` / `TCP_POOL` | VPN address ranges (`address netmask`). Defaults: `10.8.19.0 255.255.255.0` UDP, `10.8.20.0 255.255.255.0` TCP |
 | `LAN_ROUTE` / `DNS` | LAN route and DNS pushed to clients; omit to skip. `DNS` also blocks Windows from using other resolvers |
 | `REDIRECT_GATEWAY` | Full tunnel (the default). Set empty for split tunnel (`LAN_ROUTE` only) |
 | `PORT_SHARE` | TCP only: send non-OpenVPN traffic on 443 to a local HTTPS daemon. That daemon must not listen on `TCP_PORT` itself |
 | `WAN_IF` | WAN interface name for the optional nftables snippet (`eth0`) |
 | `CLIENTS` | Who gets a profile. Space-separated names. Defaults to your login |
+| `BOOTSTASH` | `auto` (default): after `make` / `make clients`, `bootstash put` if the CLI is present. `no` skips |
 
 > [!CAUTION]
 > A wrong `LAN_ROUTE` can steal a client's home or office subnet so
@@ -73,24 +65,19 @@ device.
 
 Generally, only use TCP if UDP is blocked.
 
-Copy `client/*.ovpn` off the OpenVPN host to the client device(s). (e.g. `scp`
-to a laptop, USB, AirDrop, Nearby Share). Do not share the profile as “anyone
-with the link”, it contains sensitive keys. Avoid email if possible unless you
-are using a secure email service or PGP/GPG encrypted email.
+Copy `client/*.ovpn` off the OpenVPN host (scp, USB, AirDrop, Nearby
+Share). Do not share the profile as “anyone with the link.” It
+contains sensitive keys. Avoid email unless it is encrypted.
 
-Import the profile to **OpenVPN Connect**. On mobile devices the import action
-is sometimes mislabeled **Upload**.
+Import the profile in **OpenVPN Connect**. On mobile the action is
+sometimes labeled **Upload**; that means import.
 
-[bootstash](https://github.com/nyetwurk/bootstash) is another way to transfer
-the profile to the client device. It is an HTTP/HTTPS cubby that combines
-Google OIDC with PAM. Once authenticated, the client can download the profile
-in a browser.
-
-If bootstash is on this host, `cp` into
-`/var/lib/bootstash/users/<linux-username>/`; `scp` when it is not.
-The client must reach that host *before* the tunnel is up. This
-Makefile does not install it. `PORT_SHARE` is for a local HTTPS daemon, not
-`.ovpn` files.
+[bootstash](https://github.com/nyetwurk/bootstash) is optional (Google
+OIDC + PAM in a browser). `BOOTSTASH=auto` puts into the local cubby
+when the CLI is present; the cubby exists after a PAM link. `scp` if
+the cubby is elsewhere. The phone must reach that host *before* the
+tunnel is up. This Makefile does not install the package. `PORT_SHARE`
+is not a profile server.
 
 ## Firewall/Routing
 
@@ -134,6 +121,8 @@ Run `make` as a normal user, then `sudo make deploy`.
 
 - `make` — server configs, certificates, and profiles for `CLIENTS`
 - `make clients` — `client/name.ovpn` and/or `client/name.tcp.ovpn`
+  (both also `bootstash put` when `BOOTSTASH=auto` and the CLI is present)
+- `make bootstash` — `bootstash put` only (fails if the CLI is missing)
 - `sudo make deploy` — install configs and certificates, create
   address-assignment files, restart the enabled units. Does not
   enable units. Does not install firewall or sysctl files

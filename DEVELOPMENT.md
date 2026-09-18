@@ -10,12 +10,12 @@ templates, `gen-config.py`, or the Makefile.
 - `gen-config.py` — reads `site.conf`, expands templates, writes
   `server/vars.mk`
 - Makefile — PKI, install, units. Includes `server/vars.mk` for
-  `PROTOS`, `SERVER_CN`, `REMOTE`, `IPP_FILES`, `CLIENTS`. Does not
-  `include` `site.conf`
+  `PROTOS`, `SERVER_CN`, `REMOTE`, `IPP_FILES`, `CLIENTS`,
+  `BOOTSTASH`. Does not `include` `site.conf`
 
-`DEST`, `EASYRSA`, `OPENVPN`, and `CERT_DAYS` stay Makefile-only.
-`CLIENTS` is a site.conf option (emitted into `server/vars.mk`).
-Site knobs are not `make VAR=…`.
+`DEST`, `EASYRSA`, `OPENVPN`, `CERT_DAYS`, and `BOOTSTASH_CLI` stay
+Makefile-only. `CLIENTS` and `BOOTSTASH` are site.conf options
+(emitted into `server/vars.mk`). Site knobs are not `make VAR=…`.
 
 ## Generation
 
@@ -37,6 +37,12 @@ Make stops before PKI or confs.
 `gen-config.py` (`DEFAULTS`). Unknown keys die. Empty `REMOTE` becomes
 `hostname -f`. `example.com` is rejected. `SERVER_CN` defaults to
 `REMOTE`. Empty `UDP_IPP` / `TCP_IPP` follow `STATE_DIR`.
+`BOOTSTASH` is `auto` or `no` (empty becomes `auto`). After
+`clients`, `auto` runs `bootstash put -t .` when the CLI is on
+`PATH`, `/usr/sbin`, or `/usr/local/sbin`. Missing CLI or a failed
+put does not fail `make`. `BOOTSTASH_CLI` overrides the binary.
+`make bootstash` requires a successful put. Do not parse `$DATA`
+here.
 
 Templates use `@NAME@`. Unset or leftover names fail. Do not edit
 generated files under `server/` or `client/`.

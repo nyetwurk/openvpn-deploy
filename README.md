@@ -96,6 +96,9 @@ policy on the OpenVPN host (any backend):
 A WAN-only VPS usually has no existing LAN masquerade. Implement the policy in
 whatever you run (nftables, iptables, ufw, firewalld). If you are using Debian
 and nftables, also see [QUICKSTART-VPS.md](QUICKSTART-VPS.md).
+If input drops RFC1918, limit that to the WAN (`iifname` the WAN). A
+global `@rfc1918_drop` also matches the VPN pool, so clients cannot
+reach this host.
 
 An existing NAT router that already masquerades a LAN usually has forwarding and
 subnet masquerading already configured via `sysctl` and `iptables/nftables`

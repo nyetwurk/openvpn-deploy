@@ -16,8 +16,9 @@
 #
 # Also: copy examples/99-openvpn-forward.conf to /etc/sysctl.d/
 # (net.ipv4.ip_forward=1; sysctl, not nft).
-# This file does not punch input; rfc1918_drop still matches 10/8
-# on the host itself. Client → public net is forward + masquerade.
+# This file does not punch input. Host rfc1918_drop must be WAN-only
+# (`iifname` the WAN); a global `ip saddr @@rfc1918_drop drop` also
+# matches the VPN 10/8. Client → public net is forward + masquerade.
 # Do not use on a NAT router that already has other forward rules.
 
 define WAN_IF = @WAN_IF@

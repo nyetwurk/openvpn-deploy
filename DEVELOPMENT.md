@@ -114,8 +114,9 @@ firewall; do not install `server/openvpn.nft` there. The generated
 `server/openvpn.nft` flushes `inet filter forward` (assumes that chain
 is otherwise empty). Do not flush `input`. Do not add `ip filter` /
 `ip nat` rules (`nftables.conf` deletes those leftover tables).
-SNAT is `table ip openvpn` (delete then define). The fragment does not
-punch INPUT; `rfc1918_drop` still matches `10/8` on the host.
+SNAT is `table ip openvpn` (delete then define). The fragment does
+not punch INPUT. Host `rfc1918_drop` must be WAN-only; a global
+`ip saddr @rfc1918_drop drop` also matches the VPN `10/8`.
 
 `inet filter` forward policy drop means accepts must be in that
 chain. Standalone `nft -f` of the fragment needs `inet filter` already

@@ -9,6 +9,5 @@ remote-cert-tls server
 verify-x509-name @SERVER@ name
 ignore-unknown-option block-outside-dns
 verb 3
-# v4-only tunnel
-block-ipv6
+@BLOCK_IPV6@
 mssfix @MSSFIX@

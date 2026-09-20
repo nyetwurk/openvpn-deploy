@@ -40,6 +40,15 @@ Make stops before PKI or confs.
 `REMOTE`. Empty `UDP_IPP` / `TCP_IPP` follow `STATE_DIR`.
 `DUPLICATE_CN` is `yes` or `no` (empty becomes `no`). `yes` emits
 `duplicate-cn` and leaves persist / `IPP_FILES` empty.
+`ENABLE_IPV6` is `yes` or `no` (empty becomes `yes`). `yes` emits
+`server-ipv6` (`/112` ULA or GUA), folds `ipv6` into the existing
+`redirect-gateway` push, full-tunnel `route-ipv6 2000::/3` when
+`REDIRECT_GATEWAY` is set, and omits `block-ipv6` from the client
+profile. Empty `UDP_POOL6` / `TCP_POOL6` for an enabled listener
+becomes a `/112` inside the GUA on `WAN_IF` (tags `19` / `20`,
+same as the v4 pools). No GUA there dies. Explicit CIDR still
+wins. Unknown values die. The listener stays `proto udp` / `tcp`.
+`no` is v4-only (`block-ipv6`). Still NAT66, not a routed `/64`.
 `BOOTSTASH` is `auto` or `no` (empty becomes `auto`). After
 `clients`, `auto` runs `bootstash put -t .` when the CLI is on
 `PATH`, `/usr/sbin`, or `/usr/local/sbin`. Missing CLI or a failed
@@ -51,14 +60,17 @@ Templates use `@NAME@`. Unset or leftover names fail. Do not edit
 generated files under `server/` or `client/`.
 
 - `server.conf.in` — both UDP and TCP. Optional lines
-  (`@PORT_SHARE@`, `@IPP_PERSIST@`, `@DUPLICATE_CN@`, pushes,
-  `@EXIT_NOTIFY@`) may be blank.
+  (`@PORT_SHARE@`, `@IPP_PERSIST@`, `@DUPLICATE_CN@`, `@SERVER_IPV6@`,
+  pushes, `@EXIT_NOTIFY@`) may be blank.
 - `client.ovpn.in` — `@SERVER@` `@REMOTE@` `@PORT@` `@PROTO@`
-  `@MSSFIX@`. Client writes mode `0600` (create empty, then write).
+  `@MSSFIX@` `@BLOCK_IPV6@` (`block-ipv6` when `ENABLE_IPV6=no`).
+  Client writes mode `0600` (create empty, then write).
 - `openvpn.nft.in` — WAN-only fragment. Enabled tuns and pools become
-  nft sets. Generated `server/openvpn.nft` is `0755` (`#!/usr/sbin/nft
-  -f`). Not installed. Do not use on a NAT router that already has
-  forward rules.
+  nft sets. `ENABLE_IPV6=yes` also emits `ip6` forward and
+  `table ip6 openvpn` (`snat to` the WAN GUA). Generated
+  `server/openvpn.nft` is `0755` (`#!/usr/sbin/nft -f`). Not
+  installed. Do not use on a NAT router that already has forward
+  rules.
 
 `mssfix` is on both protos (shared template). It only matters for
 `proto udp`. Do not add `fragment` (OpenVPN Connect on Android trips
@@ -121,9 +133,14 @@ firewall; do not install `server/openvpn.nft` there. The generated
 `server/openvpn.nft` flushes `inet filter forward` (assumes that chain
 is otherwise empty). Do not flush `input`. Do not add `ip filter` /
 `ip nat` rules (`nftables.conf` deletes those leftover tables).
-SNAT is `table ip openvpn` (delete then define). The fragment does
-not punch INPUT. Host `rfc1918_drop` must be WAN-only; a global
-`ip saddr @rfc1918_drop drop` also matches the VPN `10/8`.
+SNAT is `table ip openvpn` (delete then define). `ENABLE_IPV6=yes`
+also emits `table ip6 openvpn` (`snat to` the WAN GUA; masquerade
+can pick a deprecated address). The fragment does not punch INPUT.
+Host `rfc1918_drop` must be WAN-only; a global
+`ip saddr @rfc1918_drop drop` also matches the VPN `10/8`. A global
+ULA drop matches an explicit ULA pool (`fd00::/8`). The sysctl
+example sets `forwarding=1` and `accept_ra=2` so a SLAAC WAN default
+survives.
 
 `inet filter` forward policy drop means accepts must be in that
 chain. Standalone `nft -f` of the fragment needs `inet filter` already

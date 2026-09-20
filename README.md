@@ -20,7 +20,9 @@ by listening on 443 and forwarding non-OpenVPN traffic to that daemon on a
 different port.
 
 Clients get a full tunnel by default, an optional LAN route and optional DNS
-pushed to them, and a symmetric, shared `tls-crypt` key. Client IPv6 is blocked.
+pushed to them, and a symmetric, shared `tls-crypt` key. The tun is dual-stack
+by default (a `/112` from the WAN GUA, NAT66). `ENABLE_IPV6=no` blocks client
+IPv6.
 
 ## Configuration
 
@@ -39,10 +41,12 @@ your login. `REMOTE=example.com` is rejected. Omitting `REMOTE` uses
 | `UDP_PORT` / `TCP_PORT` | Listen ports (`1194` / `443`) |
 | `UDP_DEV` / `TCP_DEV` | TUN devices (`tun0` / `tun1`) |
 | `UDP_POOL` / `TCP_POOL` | VPN address ranges (`address netmask`). Defaults: `10.8.19.0 255.255.255.0` UDP, `10.8.20.0 255.255.255.0` TCP |
+| `ENABLE_IPV6` | Dual-stack on the tun (`/112`, NAT66). Default `yes`. `no` writes `block-ipv6` in the profile. The listener stays IPv4 (`proto udp` / `tcp`) |
+| `UDP_POOL6` / `TCP_POOL6` | IPv6 VPN prefixes when `ENABLE_IPV6=yes` (CIDR `/112`). Empty (the default) carves a `/112` from the GUA on `WAN_IF`. Set to override (ULA or another GUA) |
 | `LAN_ROUTE` / `DNS` | LAN route and DNS pushed to clients; omit to skip. `DNS` also blocks Windows from using other resolvers |
 | `REDIRECT_GATEWAY` | Full tunnel (the default). Set empty for split tunnel (`LAN_ROUTE` only) |
 | `PORT_SHARE` | TCP only: send non-OpenVPN traffic on 443 to a local HTTPS daemon. That daemon must not listen on `TCP_PORT` itself |
-| `WAN_IF` | WAN interface name for the optional nftables snippet (`eth0`) |
+| `WAN_IF` | WAN interface (`eth0`). nft snippet and the GUA that empty `UDP_POOL6` / `TCP_POOL6` carve from |
 | `CLIENTS` | Who gets a profile. Space-separated names. Defaults to your login |
 | `DUPLICATE_CN` | `yes` allows several live sessions with the same client cert (shared `.ovpn`) and omits pool persist. Default `no` |
 | `BOOTSTASH` | `auto` (default): after `make` / `make clients`, `bootstash put` if the CLI is present. `no` skips |
@@ -92,21 +96,35 @@ tunnel.
 Clients need this policy on the OpenVPN host (any backend):
 
 - `net.ipv4.ip_forward=1`
+- `net.ipv6.conf.all.forwarding=1` unless `ENABLE_IPV6=no`
+- `net.ipv6.conf.all.accept_ra=2` (and `default`) if the WAN IPv6
+  default is RA; `forwarding=1` otherwise ignores RAs
 - Forward established connections from the WAN back to the TUN
 - Forward the VPN subnet out the WAN
-- Masquerade the VPN subnet out the WAN
+- Masquerade the VPN IPv4 subnet out the WAN. Unless `ENABLE_IPV6=no`,
+  SNAT the tun `/112` to the WAN GUA (nft masquerade can pick a
+  deprecated address)
 
 A WAN-only VPS usually has no existing LAN masquerade. Implement the policy in
 whatever you run (nftables, iptables, ufw, firewalld). If you are using Debian
 and nftables, also see [QUICKSTART-VPS.md](QUICKSTART-VPS.md).
 If input drops RFC1918, limit that to the WAN (`iifname` the WAN). A
 global `@rfc1918_drop` also matches the VPN pool, so clients cannot
-reach this host.
+reach this host. Same for a global ULA drop if the tun pool is ULA.
 
 An existing NAT router that already masquerades a LAN usually has forwarding and
-subnet masquerading already configured via `sysctl` and `iptables/nftables`
-respectively. You will only need to add the TUN subnet as if it were just
-another LAN subnet.
+IPv4 SNAT already configured. Add the IPv4 TUN subnet the same way as the LAN.
+The tun IPv6 `/112` is carved from the **WAN** GUA (on-link), not the LAN PD,
+so it is not “another LAN prefix”: ip6 **FORWARD** must accept `$VPN_IF`, and
+postrouting must **SNAT** that `/112` to the stable WAN GUA (nft masquerade
+can pick a deprecated SLAAC address). Do not install `server/openvpn.nft`
+on that host (it flushes `inet filter forward`).
+
+Dual-stack (the default) needs a public IPv6 on `WAN_IF`. Empty
+`UDP_POOL6` / `TCP_POOL6` take a `/112` from that GUA and SNAT it
+to that GUA (not a routed `/64`, not nft masquerade). Set
+`ENABLE_IPV6=no` if the WAN is IPv4-only. An explicit ULA pool still
+loses to IPv4 (RFC 6724).
 
 > [!WARNING]
 > `server/openvpn.nft` flushes `inet filter forward`. Do not install

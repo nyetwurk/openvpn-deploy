@@ -19,6 +19,11 @@ That writes `site.conf` with `REMOTE` from `hostname -f` and stops.
 
 - Edit `site.conf` to your needs.
 - Set `WAN_IF` if the WAN is not `eth0`.
+- Dual-stack is the default and needs a public IPv6 on that WAN
+  (NAT66, not a routed `/64`). Empty pools take a `/112` from that
+  GUA. Set `ENABLE_IPV6=no` if the WAN is IPv4-only. The sysctl
+  example sets `accept_ra=2` so `forwarding=1` does not drop a
+  SLAAC WAN default.
 
 See [`examples/site.conf`](examples/site.conf) and
 [README.md#configuration](README.md#configuration) for the full list of

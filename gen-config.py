@@ -42,6 +42,9 @@ DEFAULTS = {
     "TCP_DEV": "tun1",
     "UDP_POOL": "10.8.19.0 255.255.255.0",
     "TCP_POOL": "10.8.20.0 255.255.255.0",
+    "ENABLE_IPV6": "yes",
+    "UDP_POOL6": "",
+    "TCP_POOL6": "",
     "LAN_ROUTE": "",
     "DNS": "",
     "STATE_DIR": "/var/lib/openvpn-server",
@@ -210,6 +213,27 @@ def load_site() -> dict[str, str]:
     fill_empty(cfg, "DUPLICATE_CN", DEFAULTS["DUPLICATE_CN"])
     if cfg["DUPLICATE_CN"] not in ("yes", "no"):
         die("gen-config.py: DUPLICATE_CN must be yes or no")
+    fill_empty(cfg, "WAN_IF", DEFAULTS["WAN_IF"])
+    fill_empty(cfg, "ENABLE_IPV6", DEFAULTS["ENABLE_IPV6"])
+    if cfg["ENABLE_IPV6"] not in ("yes", "no"):
+        die("gen-config.py: ENABLE_IPV6 must be yes or no")
+    if cfg["ENABLE_IPV6"] == "yes":
+        protos = enabled_protos(cfg)
+        if not protos:
+            die("gen-config.py: ENABLE_IPV6=yes needs ENABLE_UDP or ENABLE_TCP")
+        wan = None
+        for proto in protos:
+            key = f"{proto.upper()}_POOL6"
+            if not cfg[key].strip():
+                if wan is None:
+                    wan = wan_gua(cfg["WAN_IF"])
+                    if wan is None:
+                        die(
+                            "gen-config.py: ENABLE_IPV6=yes needs a global IPv6 on "
+                            f"{cfg['WAN_IF']} or {key}"
+                        )
+                cfg[key] = pool6_from_wan(wan, 0x19 if proto == "udp" else 0x20)
+            cfg[key] = require_pool6(cfg[key], key)
     return cfg
 
 
@@ -232,27 +256,109 @@ def pool_to_cidr(pool: str) -> str:
         die(f"gen-config.py: {exc}")
 
 
+def wan_gua(ifname: str) -> ipaddress.IPv6Interface | None:
+    path = Path("/proc/net/if_inet6")
+    if not path.is_file():
+        return None
+    cands: list[tuple[bool, ipaddress.IPv6Interface]] = []
+    for line in path.read_text().splitlines():
+        parts = line.split()
+        if len(parts) != 6 or parts[5] != ifname:
+            continue
+        hexaddr, _idx, plen_hex, scope_hex, flags_hex, _iface = parts
+        scope = int(scope_hex, 16)
+        flags = int(flags_hex, 16)
+        plen = int(plen_hex, 16)
+        if scope != 0:
+            continue
+        if flags & 0x68:  # dadfailed | deprecated | tentative
+            continue
+        addr = ipaddress.IPv6Address(int(hexaddr, 16))
+        if not addr.is_global:
+            continue
+        try:
+            iface = ipaddress.IPv6Interface((addr, plen))
+        except ValueError:
+            continue
+        cands.append((not bool(flags & 0x80), iface))
+    if not cands:
+        return None
+    cands.sort(key=lambda item: (item[0], int(item[1].ip)))
+    return cands[0][1]
+
+
+def pool6_from_wan(wan: ipaddress.IPv6Interface, tag: int) -> str:
+    net = wan.network
+    if net.prefixlen > 96:
+        die(f"gen-config.py: {wan} is too small for a /112 pool; set UDP_POOL6 / TCP_POOL6")
+    start = ((net.prefixlen + 15) // 16) * 16
+    if start > 96:
+        die(f"gen-config.py: {net} cannot host a tagged /112; set UDP_POOL6 / TCP_POOL6")
+    pool_int = int(net.network_address) | (tag << (128 - start - 16))
+    pool = ipaddress.IPv6Network((pool_int, 112))
+    if wan.ip in pool:
+        die(
+            f"gen-config.py: derived {pool} contains WAN {wan.ip}; "
+            "set UDP_POOL6 / TCP_POOL6"
+        )
+    if not pool.subnet_of(net):
+        die(f"gen-config.py: derived {pool} is outside {net}")
+    return str(pool)
+
+
+def require_pool6(value: str, key: str) -> str:
+    value = value.strip()
+    if not value:
+        die(f"gen-config.py: {key} is required when ENABLE_IPV6=yes")
+    try:
+        net = ipaddress.IPv6Network(value, strict=True)
+    except ValueError as exc:
+        die(f"gen-config.py: {key}: {exc}")
+    if net.prefixlen != 112:
+        die(f"gen-config.py: {key} must be a /112")
+    if (
+        net.is_link_local
+        or net.is_multicast
+        or net.is_loopback
+        or net.network_address == ipaddress.IPv6Address("::")
+        or not (net.is_private or net.is_global)
+    ):
+        die(f"gen-config.py: {key} must be a ULA or global unicast /112")
+    return str(net)
+
+
 def nft_set(items: list[str]) -> str:
     return "{ " + ", ".join(items) + " }"
 
 
 def server_mapping(cfg: dict[str, str], proto: str) -> dict[str, str]:
     dns = cfg["DNS"]
+    ipv6 = cfg["ENABLE_IPV6"] == "yes"
     port_share = cfg["PORT_SHARE"] if proto == "tcp" else ""
     duplicate = cfg["DUPLICATE_CN"] == "yes"
     ipp = "" if duplicate else proto_val(cfg, proto, "IPP")
+    pool6 = proto_val(cfg, proto, "POOL6") if ipv6 else ""
+    redir = cfg["REDIRECT_GATEWAY"].strip()
+    if ipv6 and redir:
+        parts = redir.split()
+        if "ipv6" not in parts:
+            redir = f"{redir} ipv6"
     return {
         "SERVER_CN": cfg["SERVER_CN"],
         "PROTO": proto,
         "PORT": proto_val(cfg, proto, "PORT"),
         "DEV": proto_val(cfg, proto, "DEV"),
         "POOL": proto_val(cfg, proto, "POOL"),
+        "SERVER_IPV6": with_value(pool6, "server-ipv6 {}"),
         "IPP_PERSIST": with_value(ipp, "ifconfig-pool-persist {}"),
         "DUPLICATE_CN": "duplicate-cn" if duplicate else "",
         "MSSFIX": cfg["MSSFIX"],
         "PORT_SHARE": with_value(port_share, "port-share {}"),
         "EXIT_NOTIFY": "explicit-exit-notify 1" if proto == "udp" else "",
-        "REDIRECT_GATEWAY_PUSH": with_value(cfg["REDIRECT_GATEWAY"], 'push "{}"'),
+        "REDIRECT_GATEWAY_PUSH": with_value(redir, 'push "{}"'),
+        "REDIRECT_GATEWAY_IPV6_PUSH": (
+            'push "route-ipv6 2000::/3"' if ipv6 and redir else ""
+        ),
         "LAN_ROUTE_PUSH": with_value(cfg["LAN_ROUTE"], 'push "route {}"'),
         "DNS_PUSH": with_value(dns, 'push "dhcp-option DNS {}"'),
         "BLOCK_OUTSIDE_DNS_PUSH": if_set(dns, 'push "block-outside-dns"'),
@@ -265,11 +371,35 @@ def nft_mapping(cfg: dict[str, str]) -> dict[str, str]:
         die("gen-config.py nft: no listeners (ENABLE_UDP/ENABLE_TCP)")
     ifaces = [proto_val(cfg, p, "DEV") for p in protos]
     cidrs = [pool_to_cidr(proto_val(cfg, p, "POOL")) for p in protos]
-    return {
+    out = {
         "WAN_IF": cfg["WAN_IF"],
         "VPN_IF": nft_set(ifaces),
         "VPN_IPV4_NET": nft_set(cidrs),
+        "VPN_IPV6_DEFINE": "",
+        "VPN_IPV6_FORWARD": "",
+        "VPN_IPV6_NAT": "",
     }
+    if cfg["ENABLE_IPV6"] == "yes":
+        cidrs6 = [proto_val(cfg, p, "POOL6") for p in protos]
+        out["VPN_IPV6_DEFINE"] = f"define VPN_IPv6_NET = {nft_set(cidrs6)}"
+        out["VPN_IPV6_FORWARD"] = (
+            "add rule inet filter forward oifname $WAN_IF ip6 saddr $VPN_IPv6_NET accept"
+        )
+        wan = wan_gua(cfg["WAN_IF"])
+        snat = f"snat to {wan.ip}" if wan else "masquerade"
+        out["VPN_IPV6_NAT"] = (
+            "\n"
+            "table ip6 openvpn\n"
+            "delete table ip6 openvpn\n"
+            "\n"
+            "table ip6 openvpn {\n"
+            "\tchain postrouting {\n"
+            "\t\ttype nat hook postrouting priority srcnat; policy accept;\n"
+            f"\t\toifname $WAN_IF ip6 saddr $VPN_IPv6_NET {snat}\n"
+            "\t}\n"
+            "}"
+        )
+    return out
 
 
 def emit_template(path: Path, mapping: dict[str, str], dest: Path | None, mode: int = 0o644) -> None:
@@ -366,12 +496,16 @@ def cmd_client(argv: list[str]) -> None:
     client = argv[1] if len(argv) > 1 else login_name()
     conf = require_file(out_path(argv, 2, Path("server/server-udp.conf")))
     dest = out_path(argv, 3, Path(f"client/{client}.ovpn"))
+    cfg = load_site()
     mapping = {
-        "REMOTE": load_site()["REMOTE"],
+        "REMOTE": cfg["REMOTE"],
         "SERVER": server,
         "PORT": conf_field(conf, "port", "1194"),
         "PROTO": conf_field(conf, "proto", "udp"),
         "MSSFIX": conf_field(conf, "mssfix", "1360"),
+        "BLOCK_IPV6": (
+            "# v4-only tunnel\nblock-ipv6" if cfg["ENABLE_IPV6"] != "yes" else ""
+        ),
     }
     pki = Path("easy-rsa/pki")
     data = subst_file(Path("client.ovpn.in"), mapping) + "".join(

@@ -12,24 +12,31 @@
 # a drop there still wins. Do not add rule ip filter / ip nat —
 # nftables.conf deletes those leftover iptables-nft tables.
 # SNAT lives in table ip openvpn (delete then define so a second
-# nft -f of this file is idempotent).
+# nft -f of this file is idempotent). ENABLE_IPV6=yes also emits
+# table ip6 openvpn (SNAT the tun /112 to the WAN GUA; masquerade
+# can pick a deprecated address).
 #
 # Also: copy examples/99-openvpn-forward.conf to /etc/sysctl.d/
-# (net.ipv4.ip_forward=1; sysctl, not nft).
+# (net.ipv4.ip_forward=1; ENABLE_IPV6 also needs
+# net.ipv6.conf.all.forwarding=1 and accept_ra=2 if the WAN
+# default is SLAAC; sysctl, not nft).
 # This file does not punch input. Host rfc1918_drop must be WAN-only
 # (`iifname` the WAN); a global `ip saddr @@rfc1918_drop drop` also
-# matches the VPN 10/8. Client → public net is forward + masquerade.
+# matches the VPN 10/8. A global ULA drop matches the VPN fd00::/8.
+# Client → public net is forward + masquerade.
 # Do not use on a NAT router that already has other forward rules.
 
 define WAN_IF = @WAN_IF@
 define VPN_IF = @VPN_IF@
 define VPN_IPv4_NET = @VPN_IPV4_NET@
+@VPN_IPV6_DEFINE@
 
 # This chain is otherwise empty. Flush so a second nft -f does not
 # duplicate. Do not flush input (spam/rfc1918 live there).
 flush chain inet filter forward
 add rule inet filter forward iifname $WAN_IF oifname $VPN_IF ct state related,established accept
 add rule inet filter forward oifname $WAN_IF ip saddr $VPN_IPv4_NET accept
+@VPN_IPV6_FORWARD@
 
 table ip openvpn
 delete table ip openvpn
@@ -40,3 +47,4 @@ table ip openvpn {
 		oifname $WAN_IF ip saddr $VPN_IPv4_NET masquerade
 	}
 }
+@VPN_IPV6_NAT@

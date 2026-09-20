@@ -53,6 +53,7 @@ DEFAULTS = {
     "WAN_IF": "eth0",
     "CLIENTS": "",
     "BOOTSTASH": "auto",
+    "DUPLICATE_CN": "no",
 }
 
 
@@ -206,6 +207,9 @@ def load_site() -> dict[str, str]:
     fill_empty(cfg, "BOOTSTASH", DEFAULTS["BOOTSTASH"])
     if cfg["BOOTSTASH"] not in ("auto", "no"):
         die("gen-config.py: BOOTSTASH must be auto or no")
+    fill_empty(cfg, "DUPLICATE_CN", DEFAULTS["DUPLICATE_CN"])
+    if cfg["DUPLICATE_CN"] not in ("yes", "no"):
+        die("gen-config.py: DUPLICATE_CN must be yes or no")
     return cfg
 
 
@@ -235,13 +239,16 @@ def nft_set(items: list[str]) -> str:
 def server_mapping(cfg: dict[str, str], proto: str) -> dict[str, str]:
     dns = cfg["DNS"]
     port_share = cfg["PORT_SHARE"] if proto == "tcp" else ""
+    duplicate = cfg["DUPLICATE_CN"] == "yes"
+    ipp = "" if duplicate else proto_val(cfg, proto, "IPP")
     return {
         "SERVER_CN": cfg["SERVER_CN"],
         "PROTO": proto,
         "PORT": proto_val(cfg, proto, "PORT"),
         "DEV": proto_val(cfg, proto, "DEV"),
         "POOL": proto_val(cfg, proto, "POOL"),
-        "IPP": proto_val(cfg, proto, "IPP"),
+        "IPP_PERSIST": with_value(ipp, "ifconfig-pool-persist {}"),
+        "DUPLICATE_CN": "duplicate-cn" if duplicate else "",
         "MSSFIX": cfg["MSSFIX"],
         "PORT_SHARE": with_value(port_share, "port-share {}"),
         "EXIT_NOTIFY": "explicit-exit-notify 1" if proto == "udp" else "",
@@ -279,7 +286,11 @@ def cmd_make_vars(argv: list[str]) -> None:
     dest = out_path(argv, default=Path("server/vars.mk"))
     cfg = load_site()
     protos = enabled_protos(cfg)
-    ipps = [proto_val(cfg, p, "IPP") for p in protos]
+    ipps = (
+        []
+        if cfg["DUPLICATE_CN"] == "yes"
+        else [proto_val(cfg, p, "IPP") for p in protos]
+    )
     write_out(
         "# Generated from site.conf. Do not edit.\n"
         f"REMOTE := {cfg['REMOTE']}\n"

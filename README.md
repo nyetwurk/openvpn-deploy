@@ -44,6 +44,7 @@ your login. `REMOTE=example.com` is rejected. Omitting `REMOTE` uses
 | `PORT_SHARE` | TCP only: send non-OpenVPN traffic on 443 to a local HTTPS daemon. That daemon must not listen on `TCP_PORT` itself |
 | `WAN_IF` | WAN interface name for the optional nftables snippet (`eth0`) |
 | `CLIENTS` | Who gets a profile. Space-separated names. Defaults to your login |
+| `DUPLICATE_CN` | `yes` allows several live sessions with the same client cert (shared `.ovpn`) and omits pool persist. Default `no` |
 | `BOOTSTASH` | `auto` (default): after `make` / `make clients`, `bootstash put` if the CLI is present. `no` skips |
 
 > [!CAUTION]
@@ -59,9 +60,11 @@ again.
 
 ## Clients
 
-Each `.ovpn` contains that client’s private key (`0600`). One profile per
-device. Do not run the UDP and TCP profiles at the same time on the same
-device.
+Each `.ovpn` contains that client’s private key (`0600`). By default
+OpenVPN allows one live session per certificate. Prefer one name in
+`CLIENTS` per device. `DUPLICATE_CN=yes` lets several devices share
+one profile at once; revoke then hits all of them. Do not run the UDP
+and TCP profiles at the same time on the same device.
 
 Generally, only use TCP if UDP is blocked.
 
@@ -149,7 +152,7 @@ Run `make` as a normal user, then `sudo make deploy`.
 Logs: `journalctl -u openvpn-server@server-udp`. Connected clients:
 `sudo cat /run/openvpn-server/status-server-udp.log`. Assigned VPN
 addresses persist in `/var/lib/openvpn-server/` (`ipp.txt` /
-`ipp-tcp.txt`).
+`ipp-tcp.txt`) unless `DUPLICATE_CN=yes`.
 
 If `PORT_SHARE` is on, leftover HTTPS accepts on 443 appear in the
 log. That is not a VPN client.

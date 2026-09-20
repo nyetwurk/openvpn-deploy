@@ -186,14 +186,16 @@ deploy: install-pki $(CONFS)
 	@test -n "$(CONFS)" || { echo "ENABLE_UDP and ENABLE_TCP are both off"; exit 1; }
 	install -d -m 755 "$(DEST)"
 	install -m 644 $(CONFS) "$(DEST)/"
-	@for f in $(IPP_FILES); do \
-		install -d -o nobody -g adm -m 750 "$$(dirname "$$f")"; \
-		if [ ! -e "$$f" ]; then \
-			install -o nobody -g adm -m 640 /dev/null "$$f"; \
-		else \
-			chown nobody:adm "$$f"; \
-			chmod 640 "$$f"; \
-		fi; \
-	done
+	@if [ -n "$(IPP_FILES)" ]; then \
+		for f in $(IPP_FILES); do \
+			install -d -o nobody -g adm -m 750 "$$(dirname "$$f")"; \
+			if [ ! -e "$$f" ]; then \
+				install -o nobody -g adm -m 640 /dev/null "$$f"; \
+			else \
+				chown nobody:adm "$$f"; \
+				chmod 640 "$$f"; \
+			fi; \
+		done; \
+	fi
 	systemctl daemon-reload
 	systemctl try-restart $(UNITS)

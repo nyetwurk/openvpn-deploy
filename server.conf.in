@@ -15,7 +15,8 @@ tls-crypt tc.key
 crl-verify crl.pem
 
 server @POOL@
-ifconfig-pool-persist @IPP@
+@IPP_PERSIST@
+@DUPLICATE_CN@
 
 @REDIRECT_GATEWAY_PUSH@
 @LAN_ROUTE_PUSH@

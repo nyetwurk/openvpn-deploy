@@ -11,7 +11,8 @@ templates, `gen-config.py`, or the Makefile.
   `server/vars.mk`
 - Makefile — PKI, install, units. Includes `server/vars.mk` for
   `PROTOS`, `SERVER_CN`, `REMOTE`, `IPP_FILES`, `CLIENTS`,
-  `BOOTSTASH`. Does not `include` `site.conf`
+  `BOOTSTASH`. Does not `include` `site.conf`. `IPP_FILES` is empty
+  when `DUPLICATE_CN=yes`
 
 `DEST`, `EASYRSA`, `OPENVPN`, `CERT_DAYS`, and `BOOTSTASH_CLI` stay
 Makefile-only. `CLIENTS` and `BOOTSTASH` are site.conf options
@@ -37,6 +38,8 @@ Make stops before PKI or confs.
 `gen-config.py` (`DEFAULTS`). Unknown keys die. Empty `REMOTE` becomes
 `hostname -f`. `example.com` is rejected. `SERVER_CN` defaults to
 `REMOTE`. Empty `UDP_IPP` / `TCP_IPP` follow `STATE_DIR`.
+`DUPLICATE_CN` is `yes` or `no` (empty becomes `no`). `yes` emits
+`duplicate-cn` and leaves persist / `IPP_FILES` empty.
 `BOOTSTASH` is `auto` or `no` (empty becomes `auto`). After
 `clients`, `auto` runs `bootstash put -t .` when the CLI is on
 `PATH`, `/usr/sbin`, or `/usr/local/sbin`. Missing CLI or a failed
@@ -48,7 +51,8 @@ Templates use `@NAME@`. Unset or leftover names fail. Do not edit
 generated files under `server/` or `client/`.
 
 - `server.conf.in` — both UDP and TCP. Optional lines
-  (`@PORT_SHARE@`, pushes, `@EXIT_NOTIFY@`) may be blank.
+  (`@PORT_SHARE@`, `@IPP_PERSIST@`, `@DUPLICATE_CN@`, pushes,
+  `@EXIT_NOTIFY@`) may be blank.
 - `client.ovpn.in` — `@SERVER@` `@REMOTE@` `@PORT@` `@PROTO@`
   `@MSSFIX@`. Client writes mode `0600` (create empty, then write).
 - `openvpn.nft.in` — WAN-only fragment. Enabled tuns and pools become
@@ -84,8 +88,8 @@ so `nobody` can `stat()` the CRL. `make revoke CLIENT=name` then
 
 Pool persist is not under `DEST`: `/var/lib/openvpn-server/ipp.txt`
 and `ipp-tcp.txt`. `deploy` creates the dir `0750` `nobody:adm` and
-the files `0640` if missing (does not truncate). The process stays
-`group nogroup`.
+the files `0640` if missing (does not truncate). Skipped when
+`DUPLICATE_CN=yes`. The process stays `group nogroup`.
 
 Do not use `openvpn@` (`/etc/openvpn/%i.conf`). Use
 `openvpn-server@`.

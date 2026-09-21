@@ -49,6 +49,9 @@ NEED_USER := test "$$(id -u)" -ne 0 || { echo "generate PKI as non-root; run mak
 NEED_EASYRSA := test -x "$(EASYRSA)" || { echo "missing $(EASYRSA); apt install easy-rsa"; exit 1; }
 NEED_TUN := test -e /dev/net/tun && ( exec 7<>/dev/net/tun ) 2>/dev/null || { echo "TUN device missing; enable /dev/net/tun"; exit 1; }
 
+FAIL2BAN_FILTER := examples/fail2ban/filter.d/openvpn-tls-crypt.conf
+FAIL2BAN_JAIL := examples/fail2ban/jail.d/openvpn-tls-crypt.conf
+
 CONF_DEPS := server.conf.in gen-config.py $(SITE_CONF)
 
 # Optional CLI path. Not a site.conf key. Empty = search PATH, then
@@ -164,6 +167,12 @@ dryrun: all
 	@for f in $(CONFS); do b=$$(basename "$$f"); echo "=== $$b ==="; \
 		diff -u "$(DEST)/$$b" "$$f" || true; \
 	done
+	@if [ -d /etc/fail2ban/filter.d ] && [ -d /etc/fail2ban/jail.d ]; then \
+		echo "=== $(notdir $(FAIL2BAN_FILTER)) ==="; \
+		diff -u /etc/fail2ban/filter.d/$(notdir $(FAIL2BAN_FILTER)) $(FAIL2BAN_FILTER) || true; \
+		echo "=== $(notdir $(FAIL2BAN_JAIL)) ==="; \
+		diff -u /etc/fail2ban/jail.d/$(notdir $(FAIL2BAN_JAIL)) $(FAIL2BAN_JAIL) || true; \
+	fi
 
 # PKI files are sources to copy, not Make deps (sudo must not generate them).
 install-pki:
@@ -196,6 +205,13 @@ deploy: install-pki $(CONFS)
 				chmod 640 "$$f"; \
 			fi; \
 		done; \
+	fi
+	@if [ -d /etc/fail2ban/filter.d ] && [ -d /etc/fail2ban/jail.d ]; then \
+		install -m 644 $(FAIL2BAN_FILTER) /etc/fail2ban/filter.d/; \
+		install -m 644 $(FAIL2BAN_JAIL) /etc/fail2ban/jail.d/; \
+		if systemctl is-active --quiet fail2ban.service; then \
+			fail2ban-client reload; \
+		fi; \
 	fi
 	systemctl daemon-reload
 	systemctl try-restart $(UNITS)

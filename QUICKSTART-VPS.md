@@ -87,3 +87,20 @@ Enable `openvpn-server@server-tcp` only if `ENABLE_TCP=yes`.
 `scp` `client/*.ovpn` off this VPS if you did not use local
 [bootstash](https://github.com/nyetwurk/bootstash). Profiles:
 [README.md#clients](README.md#clients).
+
+## Optional fail2ban
+
+Debian fail2ban has no OpenVPN filter. Install the package so
+`sudo make deploy` can copy the jail. Deploy skips this if
+`/etc/fail2ban` is missing. Three tls-crypt unwrap, TLS handshake
+failure, or `VERIFY ERROR` hits in 2h ban. A stale or revoked
+`.ovpn` logs the same lines as a probe.
+
+```sh
+sudo apt install fail2ban
+sudo make deploy
+```
+
+Put your own addresses in `ignoreip` (another jail.d file, not the
+copied jail). The ban is all UDP and TCP ports, not `UDP_PORT` /
+`TCP_PORT`.

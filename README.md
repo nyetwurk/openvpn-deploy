@@ -88,8 +88,8 @@ A LAN host that dials the WAN address hits this machine directly (no
 hairpin). With `LAN_ROUTE` set, other LAN destinations go through the
 tunnel.
 
-`make deploy` does not install firewall rules. Clients need this
-policy on the OpenVPN host (any backend):
+`make deploy` does not install firewall or sysctl files.
+Clients need this policy on the OpenVPN host (any backend):
 
 - `net.ipv4.ip_forward=1`
 - Forward established connections from the WAN back to the TUN
@@ -121,6 +121,15 @@ If the unit fails to start in a VM or container, add a systemd
 drop-in with `[Service]` / `LimitNPROC=infinity`. `make deploy` will not
 install one for you.
 
+Optional fail2ban: Debian's package has no OpenVPN filter.
+`sudo make deploy` copies [`examples/fail2ban/`](examples/fail2ban/)
+when `/etc/fail2ban` exists. Three tls-crypt unwrap, TLS handshake
+failure, or `VERIFY ERROR` hits in 2h ban for 4h (garbage on the
+listen port, or a stale/revoked `.ovpn`). The ban is all UDP and
+TCP, not `UDP_PORT` / `TCP_PORT`. Skips if the package is not
+installed. Does not `apt install` fail2ban. Reload happens only if
+the service is already running.
+
 ## Commands
 
 Run `make` as a normal user, then `sudo make deploy`.
@@ -130,7 +139,8 @@ Run `make` as a normal user, then `sudo make deploy`.
   (both also `bootstash put` when `BOOTSTASH=auto` and the CLI is present)
 - `make bootstash` — `bootstash put` only (fails if the CLI is missing)
 - `sudo make deploy` — install configs and certificates, create
-  address-assignment files, restart the enabled units. Does not
+  address-assignment files, restart the enabled units. Copies the
+  fail2ban tls-crypt jail if `/etc/fail2ban` exists. Does not
   enable units. Does not install firewall or sysctl files
 
 > [!WARNING]

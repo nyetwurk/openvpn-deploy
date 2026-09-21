@@ -103,7 +103,10 @@ Do not use `openvpn@` (`/etc/openvpn/%i.conf`). Use
 - `sudo make install-pki` copies CA cert, server cert/key, `tc.key`,
   CRL. Not the CA private key. Fails if `/dev/net/tun` is missing.
 - `sudo make deploy` does not install nft, sysctl, or LimitNPROC
-  drop-ins. Does not enable units. Does not install the Debian
+  drop-ins. Copies the fail2ban OpenVPN jail when `/etc/fail2ban`
+  exists; skips otherwise. Does not install the fail2ban package.
+  The jail is not generated from `UDP_PORT` / `TCP_PORT` (all UDP
+  and TCP). Does not enable units. Does not install the Debian
   `server.conf` sample.
 - `server.conf-dist` in the repo is the Debian sample. Not a unit.
 

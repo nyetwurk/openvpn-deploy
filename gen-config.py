@@ -53,6 +53,7 @@ DEFAULTS = {
     "MSSFIX": "1360",
     "REDIRECT_GATEWAY": "redirect-gateway def1 bypass-dhcp",
     "PORT_SHARE": "",
+    "TCP_LISTEN": "",
     "WAN_IF": "eth0",
     "CLIENTS": "",
     "BOOTSTASH": "auto",
@@ -234,6 +235,19 @@ def load_site() -> dict[str, str]:
                         )
                 cfg[key] = pool6_from_wan(wan, 0x19 if proto == "udp" else 0x20)
             cfg[key] = require_pool6(cfg[key], key)
+    share = cfg["PORT_SHARE"].strip()
+    listen = cfg["TCP_LISTEN"].strip()
+    cfg["PORT_SHARE"] = share
+    cfg["TCP_LISTEN"] = listen
+    if share and listen:
+        die("gen-config.py: PORT_SHARE and TCP_LISTEN cannot both be set")
+    if share or listen:
+        if cfg["ENABLE_TCP"] != "yes":
+            die("gen-config.py: PORT_SHARE and TCP_LISTEN need ENABLE_TCP=yes")
+        if share:
+            require_ipv4_host_port(share, "PORT_SHARE")
+        if listen:
+            require_ipv4_host_port(listen, "TCP_LISTEN")
     return cfg
 
 
@@ -306,6 +320,20 @@ def pool6_from_wan(wan: ipaddress.IPv6Interface, tag: int) -> str:
     return str(pool)
 
 
+def require_ipv4_host_port(value: str, key: str) -> tuple[str, str]:
+    parts = value.split()
+    if len(parts) != 2:
+        die(f"gen-config.py: {key} must be 'address port'")
+    host, port = parts
+    try:
+        ipaddress.IPv4Address(host)
+    except ValueError:
+        die(f"gen-config.py: {key}: host must be IPv4")
+    if not port.isdigit() or not (1 <= int(port) <= 65535):
+        die(f"gen-config.py: {key}: port must be 1-65535")
+    return host, port
+
+
 def require_pool6(value: str, key: str) -> str:
     value = value.strip()
     if not value:
@@ -334,7 +362,15 @@ def nft_set(items: list[str]) -> str:
 def server_mapping(cfg: dict[str, str], proto: str) -> dict[str, str]:
     dns = cfg["DNS"]
     ipv6 = cfg["ENABLE_IPV6"] == "yes"
-    port_share = cfg["PORT_SHARE"] if proto == "tcp" else ""
+    port = proto_val(cfg, proto, "PORT")
+    local = ""
+    port_share = ""
+    if proto == "tcp":
+        listen = cfg["TCP_LISTEN"]
+        port_share = cfg["PORT_SHARE"]
+        if listen:
+            host, port = require_ipv4_host_port(listen, "TCP_LISTEN")
+            local = f"local {host}"
     duplicate = cfg["DUPLICATE_CN"] == "yes"
     ipp = "" if duplicate else proto_val(cfg, proto, "IPP")
     pool6 = proto_val(cfg, proto, "POOL6") if ipv6 else ""
@@ -346,13 +382,14 @@ def server_mapping(cfg: dict[str, str], proto: str) -> dict[str, str]:
     return {
         "SERVER_CN": cfg["SERVER_CN"],
         "PROTO": proto,
-        "PORT": proto_val(cfg, proto, "PORT"),
+        "PORT": port,
         "DEV": proto_val(cfg, proto, "DEV"),
         "POOL": proto_val(cfg, proto, "POOL"),
         "SERVER_IPV6": with_value(pool6, "server-ipv6 {}"),
         "IPP_PERSIST": with_value(ipp, "ifconfig-pool-persist {}"),
         "DUPLICATE_CN": "duplicate-cn" if duplicate else "",
         "MSSFIX": cfg["MSSFIX"],
+        "LOCAL": local,
         "PORT_SHARE": with_value(port_share, "port-share {}"),
         "EXIT_NOTIFY": "explicit-exit-notify 1" if proto == "udp" else "",
         "REDIRECT_GATEWAY_PUSH": with_value(redir, 'push "{}"'),
@@ -497,11 +534,12 @@ def cmd_client(argv: list[str]) -> None:
     conf = require_file(out_path(argv, 2, Path("server/server-udp.conf")))
     dest = out_path(argv, 3, Path(f"client/{client}.ovpn"))
     cfg = load_site()
+    proto = conf_field(conf, "proto", "udp")
     mapping = {
         "REMOTE": cfg["REMOTE"],
         "SERVER": server,
-        "PORT": conf_field(conf, "port", "1194"),
-        "PROTO": conf_field(conf, "proto", "udp"),
+        "PORT": proto_val(cfg, proto, "PORT"),
+        "PROTO": proto,
         "MSSFIX": conf_field(conf, "mssfix", "1360"),
         "BLOCK_IPV6": (
             "# v4-only tunnel\nblock-ipv6" if cfg["ENABLE_IPV6"] != "yes" else ""

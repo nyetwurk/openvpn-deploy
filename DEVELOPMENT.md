@@ -60,11 +60,15 @@ Templates use `@NAME@`. Unset or leftover names fail. Do not edit
 generated files under `server/` or `client/`.
 
 - `server.conf.in` — both UDP and TCP. Optional lines
-  (`@PORT_SHARE@`, `@IPP_PERSIST@`, `@DUPLICATE_CN@`, `@SERVER_IPV6@`,
-  pushes, `@EXIT_NOTIFY@`) may be blank.
+  (`@LOCAL@`, `@PORT_SHARE@`, `@IPP_PERSIST@`, `@DUPLICATE_CN@`, `@SERVER_IPV6@`,
+  pushes, `@EXIT_NOTIFY@`) may be blank. `TCP_LISTEN` sets `@LOCAL@` and
+  the TCP `@PORT@`; clients still get `TCP_PORT`. `PORT_SHARE` is
+  `port-share` only. The two are mutually exclusive.
 - `client.ovpn.in` — `@SERVER@` `@REMOTE@` `@PORT@` `@PROTO@`
   `@MSSFIX@` `@BLOCK_IPV6@` (`block-ipv6` when `ENABLE_IPV6=no`).
-  Client writes mode `0600` (create empty, then write).
+  `@PORT@` is site.conf `UDP_PORT` / `TCP_PORT`, not the server listen
+  port when `TCP_LISTEN` is set. Client writes mode `0600` (create
+  empty, then write).
 - `openvpn.nft.in` — WAN-only fragment. Enabled tuns and pools become
   nft sets. `ENABLE_IPV6=yes` also emits `ip6` forward and
   `table ip6 openvpn` (`snat to` the WAN GUA). Generated

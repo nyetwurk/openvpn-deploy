@@ -2,6 +2,7 @@
 # TUN. Not 10.8.0.0/24 (other VPN).
 
 port @PORT@
+@LOCAL@
 @PORT_SHARE@
 proto @PROTO@
 dev @DEV@

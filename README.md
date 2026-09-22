@@ -15,9 +15,8 @@ yourself.
   existing firewall)
 
 UDP is the recommended tunnel. TCP on 443 is an optional fallback when UDP is
-blocked. OpenVPN server listeners can share that port with a local HTTPS daemon
-by listening on 443 and forwarding non-OpenVPN traffic to that daemon on a
-different port.
+blocked. That public TCP port can be OpenVPN alone, OpenVPN muxing HTTPS
+(`PORT_SHARE`), or another mux with OpenVPN on a private socket (`TCP_LISTEN`).
 
 Clients get a full tunnel by default, an optional LAN route and optional DNS
 pushed to them, and a symmetric, shared `tls-crypt` key. The tun is dual-stack
@@ -38,14 +37,15 @@ your login. `REMOTE=example.com` is rejected. Omitting `REMOTE` uses
 | `REMOTE` | Hostname clients dial; defaults to `hostname -f`. Also the server certificate name unless `SERVER_CN` is set |
 | `SERVER_CN` | Optional server certificate name; defaults to `REMOTE` |
 | `ENABLE_UDP` / `ENABLE_TCP` | `yes` to build and restart that listener (TCP defaults to `no`) |
-| `UDP_PORT` / `TCP_PORT` | Listen ports (`1194` / `443`) |
+| `UDP_PORT` / `TCP_PORT` | Ports clients dial (`1194` / `443`). TCP listen port unless `TCP_LISTEN` is set |
 | `UDP_DEV` / `TCP_DEV` | TUN devices (`tun0` / `tun1`) |
 | `UDP_POOL` / `TCP_POOL` | VPN address ranges (`address netmask`). Defaults: `10.8.19.0 255.255.255.0` UDP, `10.8.20.0 255.255.255.0` TCP |
 | `ENABLE_IPV6` | Dual-stack on the tun (`/112`, NAT66). Default `yes`. `no` writes `block-ipv6` in the profile. The listener stays IPv4 (`proto udp` / `tcp`) |
 | `UDP_POOL6` / `TCP_POOL6` | IPv6 VPN prefixes when `ENABLE_IPV6=yes` (CIDR `/112`). Empty (the default) carves a `/112` from the GUA on `WAN_IF`. Set to override (ULA or another GUA) |
 | `LAN_ROUTE` / `DNS` | LAN route and DNS pushed to clients; omit to skip. `DNS` also blocks Windows from using other resolvers |
 | `REDIRECT_GATEWAY` | Full tunnel (the default). Set empty for split tunnel (`LAN_ROUTE` only) |
-| `PORT_SHARE` | TCP only: send non-OpenVPN traffic on 443 to a local HTTPS daemon. That daemon must not listen on `TCP_PORT` itself |
+| `PORT_SHARE` | TCP only: OpenVPN muxes `TCP_PORT` toward this HTTPS daemon (`address port`). That daemon must not listen on `TCP_PORT`. Mutually exclusive with `TCP_LISTEN` |
+| `TCP_LISTEN` | TCP only: OpenVPN listens here (`address port`) when another mux owns `TCP_PORT`. Clients still dial `TCP_PORT`. Mutually exclusive with `PORT_SHARE` |
 | `WAN_IF` | WAN interface (`eth0`). nft snippet and the GUA that empty `UDP_POOL6` / `TCP_POOL6` carve from |
 | `CLIENTS` | Who gets a profile. Space-separated names. Defaults to your login |
 | `DUPLICATE_CN` | `yes` allows several live sessions with the same client cert (shared `.ovpn`) and omits pool persist. Default `no` |
@@ -83,8 +83,8 @@ sometimes labeled **Upload**; that means import.
 OIDC + PAM in a browser). `BOOTSTASH=auto` puts into the local cubby
 when the CLI is present; the cubby exists after a PAM link. `scp` if
 the cubby is elsewhere. The phone must reach that host *before* the
-tunnel is up. This Makefile does not install the package. `PORT_SHARE`
-is not a profile server.
+tunnel is up. This Makefile does not install the package. `PORT_SHARE` and
+`TCP_LISTEN` are not a profile server.
 
 ## Firewall/Routing
 
@@ -183,7 +183,37 @@ addresses persist in `/var/lib/openvpn-server/` (`ipp.txt` /
 `ipp-tcp.txt`) unless `DUPLICATE_CN=yes`.
 
 If `PORT_SHARE` is on, leftover HTTPS accepts on 443 appear in the
-log. That is not a VPN client.
+OpenVPN log. That is not a VPN client. `TCP_LISTEN` does not do that;
+HTTPS never reaches OpenVPN.
+
+## Sharing TCP 443
+
+Omit both knobs: OpenVPN listens on `TCP_PORT` (443) alone.
+
+`PORT_SHARE = 127.0.0.1 8443`: OpenVPN is the mux. It listens on 443 and
+forwards non-OpenVPN TCP to that HTTPS daemon. Apache sees `127.0.0.1`.
+The daemon must not listen on 443.
+
+`TCP_LISTEN = 127.0.0.1 1194`: another process owns 443. OpenVPN TCP binds
+that socket. `.tcp.ovpn` still dials `TCP_PORT` (443). This Makefile
+does not install that process.
+
+Debian HAProxy can mux 443: TLS to Apache with PROXY v2, everything else
+to OpenVPN. Copy [`examples/haproxy-local.cfg`](examples/haproxy-local.cfg)
+to `/etc/haproxy/haproxy-local.cfg`. Keep `CONFIG` on the stock
+`/etc/haproxy/haproxy.cfg` and in `/etc/default/haproxy` set:
+
+```
+EXTRAOPTS="-S /run/haproxy-master.sock -f /etc/haproxy/haproxy-local.cfg"
+```
+
+That is `-f haproxy.cfg -f haproxy-local.cfg`. Do not set `CONFIG` to
+the local file alone (no `global`/`defaults` from stock). Apache must
+listen only on loopback and enable `mod_remoteip`, or anyone who can
+reach 8443 can spoof client IPs: `Listen 127.0.0.1:8443`,
+`a2enmod remoteip`, `RemoteIPProxyProtocol On`. Cutover: stop
+`openvpn-server@server-tcp`, `sudo make deploy` with `TCP_LISTEN`,
+start HAProxy.
 
 ## License
 

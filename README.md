@@ -13,7 +13,8 @@ yourself.
   (`NFT_MODE` defaults to `vps`), and it does not install sysctl. See
   [QUICKSTART-VPS.md](QUICKSTART-VPS.md).
 - An existing NAT router that already masquerades a LAN (keep that host’s
-  existing firewall)
+  existing firewall; `NFT_MODE=nat` copies `server/openvpn-nat.nft`
+  when `NFT_DEST` is set)
 
 UDP is the recommended tunnel. TCP on 443 is an optional fallback when UDP is
 blocked. That public TCP port can be OpenVPN alone, OpenVPN muxing HTTPS
@@ -48,6 +49,8 @@ your login. `REMOTE=example.com` is rejected. Omitting `REMOTE` uses
 | `PORT_SHARE` | TCP only: OpenVPN muxes `TCP_PORT` toward this HTTPS daemon (`address port`). That daemon must not listen on `TCP_PORT`. Mutually exclusive with `TCP_LISTEN` |
 | `TCP_LISTEN` | TCP only: OpenVPN listens here (`address port`) when another mux owns `TCP_PORT`. Clients still dial `TCP_PORT`. Mutually exclusive with `PORT_SHARE` |
 | `WAN_IF` | WAN interface (`eth0`). nft snippet and the GUA that empty `UDP_POOL6` / `TCP_POOL6` carve from |
+| `NFT_MODE` | Which generated fragment `make deploy` copies. `vps` (default) is `server/openvpn.nft` (flushes `inet filter forward`). `nat` is `server/openvpn-nat.nft` (fills parent jump chains; does not flush forward). `nat` requires `NFT_DEST` |
+| `NFT_DEST` | Absolute path to copy that fragment to (`0755`). Empty skips the copy. Does not `nft -f`. `make dryrun` diffs this path against the fragment |
 | `CLIENTS` | Who gets a profile. Space-separated names. Defaults to your login |
 | `DUPLICATE_CN` | `yes` allows several live sessions with the same client cert (shared `.ovpn`) and omits pool persist. Default `no` |
 | `BOOTSTASH` | `auto` (default): after `make` / `make clients`, `bootstash put` if the CLI is present. `no` skips |
@@ -93,11 +96,14 @@ A LAN host that dials the WAN address hits this machine directly (no
 hairpin). With `LAN_ROUTE` set, other LAN destinations go through the
 tunnel.
 
-`make deploy` does not install sysctl. It copies an nft fragment
-when `NFT_DEST` is set. `NFT_MODE` defaults to `vps`
-(`server/openvpn.nft`; `nat` → `server/openvpn-nat.nft`), and it
-does not `nft -f`. `make dryrun` diffs `NFT_DEST` against that
-file. Empty `NFT_DEST` skips the copy.
+`make` writes both fragments: `server/openvpn.nft` from
+[`openvpn.nft.in`](openvpn.nft.in) and `server/openvpn-nat.nft` from
+[`openvpn-nat.nft.in`](openvpn-nat.nft.in). `make deploy` does not
+install sysctl. It copies one fragment when `NFT_DEST` is set.
+`NFT_MODE` defaults to `vps` (`server/openvpn.nft`; `nat` →
+`server/openvpn-nat.nft`), mode `0755`, and it does not `nft -f`.
+`make dryrun` diffs `NFT_DEST` against that file. Empty `NFT_DEST`
+skips the copy.
 Clients need this policy on the OpenVPN host (any backend):
 
 - `net.ipv4.ip_forward=1`
@@ -175,8 +181,9 @@ Run `make` as a normal user, then `sudo make deploy`.
 - `make bootstash` — `bootstash put` only (fails if the CLI is missing)
 - `sudo make deploy` — install configs and certificates, create
   address-assignment files, restart the enabled units. Copies the
-  fail2ban tls-crypt jail if `/etc/fail2ban` exists. Does not
-  enable units. Does not install firewall or sysctl files
+  nft fragment to `NFT_DEST` when that path is set (does not
+  `nft -f`). Copies the fail2ban tls-crypt jail if `/etc/fail2ban`
+  exists. Does not enable units. Does not install sysctl
 
 > [!WARNING]
 > Overwrites files under `/etc/openvpn/server` (including the CA
@@ -185,7 +192,8 @@ Run `make` as a normal user, then `sudo make deploy`.
 
 - `make revoke CLIENT=name` — revoke that client, then
   `sudo make deploy`
-- `make dryrun` — compare generated configs to what is installed
+- `make dryrun` — compare generated configs to what is installed,
+  and `NFT_DEST` to the selected fragment when that path is set
 - `make clean` — generated configs and `client/` (keeps certificates)
 - `make distclean` — `clean` plus all certificates. Does not delete
   `site.conf`

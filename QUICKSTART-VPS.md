@@ -75,6 +75,13 @@ sudo cp server/openvpn.nft /etc/nftables.d/openvpn.nft
 sudo /etc/nftables.d/openvpn.nft
 ```
 
+Skip the `openvpn.nft` copy when `site.conf` sets
+`NFT_DEST=/etc/nftables.d/openvpn.nft`. `NFT_MODE` defaults to
+`vps`. `sudo make deploy` copies
+that file and does not load it. Run `nft -f /etc/nftables.conf` (or
+the fragment) yourself. `make dryrun` diffs `NFT_DEST` against
+`server/openvpn.nft`. Sysctl stays a manual copy.
+
 ## Install server configs/units and start OpenVPN
 
 ```sh
@@ -85,9 +92,10 @@ sudo systemctl enable --now openvpn-server@server-udp
 Enable `openvpn-server@server-tcp` only if `ENABLE_TCP=yes`.
 
 > [!WARNING]
-> `server/openvpn.nft` flushes `inet filter forward`. Deploy writes
-> `/etc/openvpn/server` and can break other OpenVPN units that share
-> that directory or those unit names.
+> `server/openvpn.nft` flushes `inet filter forward`. A NAT router
+> sets `NFT_MODE=nat` and `NFT_DEST`, or copies `server/openvpn-nat.nft`.
+> Deploy writes `/etc/openvpn/server` and can break other OpenVPN
+> units that share that directory or those unit names.
 
 `scp` `client/*.ovpn` off this VPS if you did not use local
 [bootstash](https://github.com/nyetwurk/bootstash). Profiles:

@@ -58,6 +58,8 @@ DEFAULTS = {
     "CLIENTS": "",
     "BOOTSTASH": "auto",
     "DUPLICATE_CN": "no",
+    "NFT_MODE": "vps",
+    "NFT_DEST": "",
 }
 
 
@@ -215,6 +217,15 @@ def load_site() -> dict[str, str]:
     if cfg["DUPLICATE_CN"] not in ("yes", "no"):
         die("gen-config.py: DUPLICATE_CN must be yes or no")
     fill_empty(cfg, "WAN_IF", DEFAULTS["WAN_IF"])
+    cfg["NFT_MODE"] = cfg["NFT_MODE"].strip()
+    cfg["NFT_DEST"] = cfg["NFT_DEST"].strip()
+    fill_empty(cfg, "NFT_MODE", DEFAULTS["NFT_MODE"])
+    if cfg["NFT_MODE"] not in ("vps", "nat"):
+        die("gen-config.py: NFT_MODE must be vps or nat")
+    if cfg["NFT_MODE"] == "nat" and not cfg["NFT_DEST"]:
+        die("gen-config.py: NFT_MODE=nat needs NFT_DEST")
+    if cfg["NFT_DEST"] and not cfg["NFT_DEST"].startswith("/"):
+        die("gen-config.py: NFT_DEST must be an absolute path")
     fill_empty(cfg, "ENABLE_IPV6", DEFAULTS["ENABLE_IPV6"])
     if cfg["ENABLE_IPV6"] not in ("yes", "no"):
         die("gen-config.py: ENABLE_IPV6 must be yes or no")
@@ -402,23 +413,30 @@ def server_mapping(cfg: dict[str, str], proto: str) -> dict[str, str]:
     }
 
 
-def nft_mapping(cfg: dict[str, str]) -> dict[str, str]:
+def nft_listener_sets(cfg: dict[str, str]) -> tuple[str, str, str]:
     protos = enabled_protos(cfg)
     if not protos:
         die("gen-config.py nft: no listeners (ENABLE_UDP/ENABLE_TCP)")
     ifaces = [proto_val(cfg, p, "DEV") for p in protos]
     cidrs = [pool_to_cidr(proto_val(cfg, p, "POOL")) for p in protos]
+    v6_define = ""
+    if cfg["ENABLE_IPV6"] == "yes":
+        cidrs6 = [proto_val(cfg, p, "POOL6") for p in protos]
+        v6_define = f"define VPN_IPv6_NET = {nft_set(cidrs6)}"
+    return nft_set(ifaces), nft_set(cidrs), v6_define
+
+
+def nft_mapping(cfg: dict[str, str]) -> dict[str, str]:
+    vpn_if, vpn_v4, v6_define = nft_listener_sets(cfg)
     out = {
         "WAN_IF": cfg["WAN_IF"],
-        "VPN_IF": nft_set(ifaces),
-        "VPN_IPV4_NET": nft_set(cidrs),
-        "VPN_IPV6_DEFINE": "",
+        "VPN_IF": vpn_if,
+        "VPN_IPV4_NET": vpn_v4,
+        "VPN_IPV6_DEFINE": v6_define,
         "VPN_IPV6_FORWARD": "",
         "VPN_IPV6_NAT": "",
     }
     if cfg["ENABLE_IPV6"] == "yes":
-        cidrs6 = [proto_val(cfg, p, "POOL6") for p in protos]
-        out["VPN_IPV6_DEFINE"] = f"define VPN_IPv6_NET = {nft_set(cidrs6)}"
         out["VPN_IPV6_FORWARD"] = (
             "add rule inet filter forward oifname $WAN_IF ip6 saddr $VPN_IPv6_NET accept"
         )
@@ -437,6 +455,34 @@ def nft_mapping(cfg: dict[str, str]) -> dict[str, str]:
             "}"
         )
     return out
+
+
+def nft_nat_mapping(cfg: dict[str, str]) -> dict[str, str]:
+    vpn_if, vpn_v4, v6_define = nft_listener_sets(cfg)
+    v6_rules = ""
+    if cfg["ENABLE_IPV6"] == "yes":
+        v6_rules = (
+            "\n"
+            "flush chain ip6 filter openvpn\n"
+            "add rule ip6 filter openvpn iifname $VPN_IF accept\n"
+            "add rule ip6 filter openvpn oifname $VPN_IF accept\n"
+            "\n"
+            "flush chain ip6 nat openvpn_dnat\n"
+            "add rule ip6 nat openvpn_dnat iifname $VPN_IF udp dport 53 "
+            "fib daddr type != local dnat to $LAN_IPv6\n"
+            "add rule ip6 nat openvpn_dnat iifname $VPN_IF tcp dport 53 "
+            "fib daddr type != local dnat to $LAN_IPv6\n"
+            "\n"
+            "flush chain ip6 nat openvpn_snat\n"
+            "add rule ip6 nat openvpn_snat ip6 saddr $VPN_IPv6_NET "
+            "oifname $WAN_IF snat to $WAN_IPv6"
+        )
+    return {
+        "VPN_IF": vpn_if,
+        "VPN_IPV4_NET": vpn_v4,
+        "VPN_IPV6_DEFINE": v6_define,
+        "VPN_IPV6_RULES": v6_rules,
+    }
 
 
 def emit_template(path: Path, mapping: dict[str, str], dest: Path | None, mode: int = 0o644) -> None:
@@ -465,7 +511,9 @@ def cmd_make_vars(argv: list[str]) -> None:
         f"PROTOS := {' '.join(protos)}\n"
         f"IPP_FILES := {' '.join(ipps)}\n"
         f"CLIENTS := {cfg['CLIENTS']}\n"
-        f"BOOTSTASH := {cfg['BOOTSTASH']}\n",
+        f"BOOTSTASH := {cfg['BOOTSTASH']}\n"
+        f"NFT_MODE := {cfg['NFT_MODE']}\n"
+        f"NFT_DEST := {cfg['NFT_DEST']}\n",
         dest,
     )
 
@@ -481,6 +529,13 @@ def cmd_server(argv: list[str]) -> None:
 def cmd_nft(argv: list[str]) -> None:
     expect_argv(argv, "nft [OUT]", max_n=1)
     emit_template(Path("openvpn.nft.in"), nft_mapping(load_site()), out_path(argv), 0o755)
+
+
+def cmd_nft_nat(argv: list[str]) -> None:
+    expect_argv(argv, "nft-nat [OUT]", max_n=1)
+    emit_template(
+        Path("openvpn-nat.nft.in"), nft_nat_mapping(load_site()), out_path(argv), 0o755
+    )
 
 
 def login_name() -> str:
@@ -570,6 +625,7 @@ def usage() -> None:
         "       gen-config.py make-vars [OUT]\n"
         "       gen-config.py server udp|tcp [OUT]\n"
         "       gen-config.py nft [OUT]\n"
+        "       gen-config.py nft-nat [OUT]\n"
         "       gen-config.py client SERVER_CN [CLIENT [CONF [OUT]]]"
     )
 

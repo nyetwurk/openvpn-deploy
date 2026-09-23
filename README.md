@@ -9,7 +9,8 @@ yourself.
 
 - A WAN-only VPS with no LAN (you must forward and masquerade the
   VPN subnet yourself; this tool can emit a Debian nftables snippet.
-  `make deploy` does not install firewall or sysctl files. See
+  `make deploy` copies that snippet when `NFT_DEST` is set
+  (`NFT_MODE` defaults to `vps`), and it does not install sysctl. See
   [QUICKSTART-VPS.md](QUICKSTART-VPS.md).
 - An existing NAT router that already masquerades a LAN (keep that host’s
   existing firewall)
@@ -92,7 +93,11 @@ A LAN host that dials the WAN address hits this machine directly (no
 hairpin). With `LAN_ROUTE` set, other LAN destinations go through the
 tunnel.
 
-`make deploy` does not install firewall or sysctl files.
+`make deploy` does not install sysctl. It copies an nft fragment
+when `NFT_DEST` is set. `NFT_MODE` defaults to `vps`
+(`server/openvpn.nft`; `nat` → `server/openvpn-nat.nft`), and it
+does not `nft -f`. `make dryrun` diffs `NFT_DEST` against that
+file. Empty `NFT_DEST` skips the copy.
 Clients need this policy on the OpenVPN host (any backend):
 
 - `net.ipv4.ip_forward=1`
@@ -118,7 +123,19 @@ The tun IPv6 `/112` is carved from the **WAN** GUA (on-link), not the LAN PD,
 so it is not “another LAN prefix”: ip6 **FORWARD** must accept `$VPN_IF`, and
 postrouting must **SNAT** that `/112` to the stable WAN GUA (nft masquerade
 can pick a deprecated SLAAC address). Do not install `server/openvpn.nft`
-on that host (it flushes `inet filter forward`).
+on that host (it flushes `inet filter forward`). An accept in a second
+table does not override `policy drop` on the existing forward chain.
+
+`make` also writes `server/openvpn-nat.nft` from
+[`openvpn-nat.nft.in`](openvpn-nat.nft.in). Set `NFT_MODE=nat` and
+`NFT_DEST` to an absolute path that loads after the filter and nat
+tables (for example `/etc/nftables.d/50-openvpn.nft`) so
+`sudo make deploy` copies it there. With `NFT_DEST` empty, copy the
+file yourself. The parent keeps its own chains and jumps into empty
+`openvpn` / `openvpn_dnat` / `openvpn_snat` chains; the fragment
+only flushes those. It does not flush forward. It defines the tun
+sets from `site.conf` and uses the parent's `WAN_*` and `LAN_*`
+addresses. DNS intercept to the LAN resolver is in that file.
 
 Dual-stack (the default) needs a public IPv6 on `WAN_IF`. Empty
 `UDP_POOL6` / `TCP_POOL6` take a `/112` from that GUA and SNAT it

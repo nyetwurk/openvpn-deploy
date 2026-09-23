@@ -35,6 +35,15 @@ CONFS := $(addprefix server/server-,$(addsuffix .conf,$(PROTOS)))
 UNITS := $(addprefix openvpn-server@server-,$(PROTOS))
 CLIENT_OVPNS := $(foreach p,$(PROTOS),$(addprefix client/,$(addsuffix $(if $(filter tcp,$(p)),.tcp).ovpn,$(CLIENTS))))
 NFT := $(if $(PROTOS),server/openvpn.nft)
+NFT_NAT := $(if $(PROTOS),server/openvpn-nat.nft)
+NFT_SRC :=
+ifneq ($(NFT_DEST),)
+ifeq ($(NFT_MODE),nat)
+NFT_SRC := server/openvpn-nat.nft
+else
+NFT_SRC := server/openvpn.nft
+endif
+endif
 
 PKI := easy-rsa/pki
 SERIAL := $(PKI)/serial
@@ -64,11 +73,11 @@ BOOTSTASH_CLI ?=
 
 all: confs pki clients
 
-confs: $(CONFS) $(NFT)
+confs: $(CONFS) $(NFT) $(NFT_NAT)
 
 clean:
 	rm -rf client
-	rm -f server/server-*.conf server/openvpn.nft server/vars.mk server/*.tmp
+	rm -f server/server-*.conf server/openvpn.nft server/openvpn-nat.nft server/vars.mk server/*.tmp
 
 distclean pki-clean: clean
 	rm -rf server $(PKI)
@@ -112,6 +121,9 @@ server/server-%.conf: $(CONF_DEPS)
 
 server/openvpn.nft: openvpn.nft.in gen-config.py $(SITE_CONF)
 	./gen-config.py nft $@
+
+server/openvpn-nat.nft: openvpn-nat.nft.in gen-config.py $(SITE_CONF)
+	./gen-config.py nft-nat $@
 
 $(SERIAL):
 	@$(NEED_USER)
@@ -173,6 +185,10 @@ dryrun: all
 		echo "=== $(notdir $(FAIL2BAN_JAIL)) ==="; \
 		diff -u /etc/fail2ban/jail.d/$(notdir $(FAIL2BAN_JAIL)) $(FAIL2BAN_JAIL) || true; \
 	fi
+	@if [ -n "$(NFT_SRC)" ]; then \
+		echo "=== $(NFT_DEST) ==="; \
+		diff -u "$(NFT_DEST)" "$(NFT_SRC)" || true; \
+	fi
 
 # PKI files are sources to copy, not Make deps (sudo must not generate them).
 install-pki:
@@ -189,12 +205,15 @@ install-pki:
 	install -m 600 "$(TC_KEY)" "$(DEST)/tc.key"
 	install -m 644 "$(CRL)" "$(DEST)/crl.pem"
 
-deploy: install-pki $(CONFS)
+deploy: install-pki $(CONFS) $(NFT_SRC)
 	@test "$$(id -u)" -eq 0 || { echo "need root: sudo make deploy"; exit 1; }
 	@$(NEED_TUN)
 	@test -n "$(CONFS)" || { echo "ENABLE_UDP and ENABLE_TCP are both off"; exit 1; }
 	install -d -m 755 "$(DEST)"
 	install -m 644 $(CONFS) "$(DEST)/"
+	@if [ -n "$(NFT_SRC)" ]; then \
+		install -D -m 755 "$(NFT_SRC)" "$(NFT_DEST)"; \
+	fi
 	@if [ -n "$(IPP_FILES)" ]; then \
 		for f in $(IPP_FILES); do \
 			install -d -o nobody -g adm -m 750 "$$(dirname "$$f")"; \

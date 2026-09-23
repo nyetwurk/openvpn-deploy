@@ -1,4 +1,4 @@
-# Generated live unit. Annotated sample: server.conf
+# Generated live unit. Annotated sample: server.conf-dist
 # TUN. Not 10.8.0.0/24 (other VPN).
 
 port @PORT@

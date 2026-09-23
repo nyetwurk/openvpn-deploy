@@ -1,0 +1,51 @@
+#!/usr/sbin/nft -f
+#
+# Generated from openvpn-nat.nft.in. Do not edit.
+# OpenVPN rules for a NAT router that already has ip/ip6 filter and nat.
+# `sudo make deploy` copies this file to NFT_DEST when NFT_MODE=nat.
+# It does not nft -f. Do not load server/openvpn.nft here
+# (it flushes inet filter forward and owns table ip openvpn /
+# table ip6 openvpn). An accept in another table does not override
+# policy drop on ip filter / ip6 filter.
+#
+# Copy to /etc/nftables.d/ under a name that sorts after the table
+# files (for example 50-openvpn.nft). The parent glob include loads it.
+#
+# Parent already defines WAN_IF, WAN_IPv4, WAN_IPv6, LAN_IPv4, LAN_IPv6.
+# This file defines the tun sets from site.conf. Do not define those
+# VPN_* names again in the parent (nft rejects a redefinition).
+#
+# Parent creates these regular chains and jumps to them. Jumps stay
+# in the parent so a second load of this file does not stack jumps.
+# This file only flushes the chains it fills.
+#
+#   table ip filter  { chain openvpn { } }
+#   # FORWARD (policy drop), where tun traffic is accepted:
+#   jump openvpn
+#
+#   table ip nat {
+#       chain openvpn_dnat { }
+#       chain openvpn_snat { }
+#   }
+#   # PREROUTING, with the other DNS intercepts: jump openvpn_dnat
+#   # POSTROUTING, after LAN SNAT:              jump openvpn_snat
+#
+# ENABLE_IPV6=yes also fills ip6 filter openvpn, ip6 nat openvpn_dnat,
+# and ip6 nat openvpn_snat. Put the ip6 filter jump below any invalid
+# reject. Omit those parent chains when ENABLE_IPV6=no.
+
+define VPN_IF = @VPN_IF@
+define VPN_IPv4_NET = @VPN_IPV4_NET@
+@VPN_IPV6_DEFINE@
+
+flush chain ip filter openvpn
+add rule ip filter openvpn iifname $VPN_IF accept
+add rule ip filter openvpn oifname $VPN_IF accept
+
+flush chain ip nat openvpn_dnat
+add rule ip nat openvpn_dnat iifname $VPN_IF udp dport 53 fib daddr type != local dnat to $LAN_IPv4
+add rule ip nat openvpn_dnat iifname $VPN_IF tcp dport 53 fib daddr type != local dnat to $LAN_IPv4
+
+flush chain ip nat openvpn_snat
+add rule ip nat openvpn_snat ip saddr $VPN_IPv4_NET oifname $WAN_IF snat to $WAN_IPv4
+@VPN_IPV6_RULES@

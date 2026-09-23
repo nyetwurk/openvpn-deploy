@@ -1,9 +1,10 @@
 #!/usr/sbin/nft -f
 #
 # OpenVPN TUN forward + masquerade for a WAN-only VPS (no LAN).
-# Not installed by `make deploy`. Copy server/openvpn.nft to
-# /etc/nftables.d/openvpn.nft so `include "/etc/nftables.d/*.nft"`
-# loads it after inet filter exists.
+# `sudo make deploy` copies server/openvpn.nft to NFT_DEST when
+# NFT_MODE is vps (the default) and NFT_DEST is set. It does not
+# nft -f. Otherwise copy it to /etc/nftables.d/openvpn.nft so
+# `include "/etc/nftables.d/*.nft"` loads it after inet filter exists.
 #   nft -f /etc/nftables.conf
 # Standalone (inet filter must already exist):
 #   nft -f /etc/nftables.d/openvpn.nft
@@ -25,6 +26,10 @@
 # matches the VPN 10/8. A global ULA drop matches the VPN fd00::/8.
 # Client → public net is forward + masquerade.
 # Do not use on a NAT router that already has other forward rules.
+# That host uses server/openvpn-nat.nft (openvpn-nat.nft.in),
+# copied by `make deploy` when NFT_MODE=nat and NFT_DEST is set.
+# Do not include that file from this fragment: it fills ip filter /
+# ip nat chains this WAN-only script does not create.
 
 define WAN_IF = @WAN_IF@
 define VPN_IF = @VPN_IF@

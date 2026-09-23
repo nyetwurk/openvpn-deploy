@@ -11,8 +11,8 @@ templates, `gen-config.py`, or the Makefile.
   `server/vars.mk`
 - Makefile — PKI, install, units. Includes `server/vars.mk` for
   `PROTOS`, `SERVER_CN`, `REMOTE`, `IPP_FILES`, `CLIENTS`,
-  `BOOTSTASH`. Does not `include` `site.conf`. `IPP_FILES` is empty
-  when `DUPLICATE_CN=yes`
+  `BOOTSTASH`, `NFT_MODE`, `NFT_DEST`. Does not `include`
+  `site.conf`. `IPP_FILES` is empty when `DUPLICATE_CN=yes`
 
 `DEST`, `EASYRSA`, `OPENVPN`, `CERT_DAYS`, and `BOOTSTASH_CLI` stay
 Makefile-only. `CLIENTS` and `BOOTSTASH` are site.conf options
@@ -31,6 +31,7 @@ Make stops before PKI or confs.
 ./gen-config.py make-vars [OUT]
 ./gen-config.py server udp|tcp [OUT]
 ./gen-config.py nft [OUT]
+./gen-config.py nft-nat [OUT]
 ./gen-config.py client SERVER_CN [CLIENT [CONF [OUT]]]
 ```
 
@@ -54,7 +55,10 @@ wins. Unknown values die. The listener stays `proto udp` / `tcp`.
 `PATH`, `/usr/sbin`, or `/usr/local/sbin`. Missing CLI or a failed
 put does not fail `make`. `BOOTSTASH_CLI` overrides the binary.
 `make bootstash` requires a successful put. Do not parse `$DATA`
-here.
+here. `NFT_MODE` is `vps` or `nat` (empty becomes `vps`).
+`NFT_DEST` is empty or an absolute path. Empty `NFT_DEST` skips the
+nft copy. `NFT_MODE=nat` with an empty `NFT_DEST` dies. `vps`
+selects `server/openvpn.nft`. `nat` selects `server/openvpn-nat.nft`.
 
 Templates use `@NAME@`. Unset or leftover names fail. Do not edit
 generated files under `server/` or `client/`.
@@ -72,9 +76,17 @@ generated files under `server/` or `client/`.
 - `openvpn.nft.in` — WAN-only fragment. Enabled tuns and pools become
   nft sets. `ENABLE_IPV6=yes` also emits `ip6` forward and
   `table ip6 openvpn` (`snat to` the WAN GUA). Generated
-  `server/openvpn.nft` is `0755` (`#!/usr/sbin/nft -f`). Not
-  installed. Do not use on a NAT router that already has forward
+  `server/openvpn.nft` is `0755` (`#!/usr/sbin/nft -f`). Deploy
+  copies it `0755` only when `NFT_DEST` is set and `NFT_MODE` is
+  `vps`. Do not use on a NAT router that already has forward
   rules.
+- `openvpn-nat.nft.in` — NAT-router fragment. Same tun sets.
+  Defines `VPN_IF` / `VPN_IPv4_NET` / `VPN_IPv6_NET` only. Rules use
+  the parent's `WAN_IF`, `WAN_IPv4`, `WAN_IPv6`, `LAN_IPv4`,
+  `LAN_IPv6` (a second `define` of those names is an error).
+  Fills jump chains; does not flush forward. `ENABLE_IPV6=no`
+  omits the ip6 flushes. Generated `server/openvpn-nat.nft` is
+  `0755`. Deploy copies it `0755` when `NFT_MODE=nat`.
 
 `mssfix` is on both protos (shared template). It only matters for
 `proto udp`. Do not add `fragment` (OpenVPN Connect on Android trips
@@ -118,9 +130,12 @@ Do not use `openvpn@` (`/etc/openvpn/%i.conf`). Use
   vendor `vars` or `openssl-easyrsa.cnf`.
 - `sudo make install-pki` copies CA cert, server cert/key, `tc.key`,
   CRL. Not the CA private key. Fails if `/dev/net/tun` is missing.
-- `sudo make deploy` does not install nft, sysctl, or LimitNPROC
-  drop-ins. Copies the fail2ban OpenVPN jail when `/etc/fail2ban`
-  exists; skips otherwise. Does not install the fail2ban package.
+- `sudo make deploy` does not install sysctl or LimitNPROC
+  drop-ins. When `NFT_DEST` is set, it copies that
+  fragment to `NFT_DEST` (`install -v -D -m 755`). It does not
+  `nft -f` and does not reload `nftables.service`. Copies the
+  fail2ban OpenVPN jail when `/etc/fail2ban` exists; skips
+  otherwise. Does not install the fail2ban package.
   The jail is not generated from `UDP_PORT` / `TCP_PORT` (all UDP
   and TCP). Does not enable units. Does not install the Debian
   `server.conf` sample.
@@ -132,11 +147,22 @@ a VM (`systemd-detect-virt`). Drop-in
 
 ## Firewall notes
 
-`make deploy` must not install nft. A NAT router keeps its existing
-firewall; do not install `server/openvpn.nft` there. The generated
+`make deploy` does not install nft unless `NFT_DEST` is set.
+`NFT_MODE` defaults to `vps`. Then it copies `server/openvpn.nft` (`vps`) or
+`server/openvpn-nat.nft` (`nat`) to that path and does not load it.
+`make dryrun` diffs `NFT_DEST` against that fragment. A NAT router
+keeps its existing firewall; use `NFT_MODE=nat` there. `NFT_MODE=vps`
+installs `server/openvpn.nft`, which flushes `inet filter forward`.
+With `NFT_DEST` unset, copy the matching fragment yourself:
+`server/openvpn.nft` on a WAN-only host, `server/openvpn-nat.nft`
+on a NAT router (loaded after the filter and nat tables). The parent
+jumps to chains the NAT file fills
+(`ip`/`ip6` filter and nat). An accept in another table does not
+override `policy drop` on the parent forward chain. The generated WAN-only
 `server/openvpn.nft` flushes `inet filter forward` (assumes that chain
-is otherwise empty). Do not flush `input`. Do not add `ip filter` /
-`ip nat` rules (`nftables.conf` deletes those leftover tables).
+is otherwise empty). That fragment must not flush `input`, and must
+not add `ip filter` / `ip nat` rules (`examples/nftables.conf` deletes
+those leftover tables).
 SNAT is `table ip openvpn` (delete then define). `ENABLE_IPV6=yes`
 also emits `table ip6 openvpn` (`snat to` the WAN GUA; masquerade
 can pick a deprecated address). The fragment does not punch INPUT.

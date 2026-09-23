@@ -212,13 +212,13 @@ deploy: install-pki $(CONFS) $(NFT_SRC)
 	install -d -m 755 "$(DEST)"
 	install -m 644 $(CONFS) "$(DEST)/"
 	@if [ -n "$(NFT_SRC)" ]; then \
-		install -D -m 755 "$(NFT_SRC)" "$(NFT_DEST)"; \
+		install -v -D -m 755 "$(NFT_SRC)" "$(NFT_DEST)"; \
 	fi
 	@if [ -n "$(IPP_FILES)" ]; then \
 		for f in $(IPP_FILES); do \
-			install -d -o nobody -g adm -m 750 "$$(dirname "$$f")"; \
+			install -v -d -o nobody -g adm -m 750 "$$(dirname "$$f")"; \
 			if [ ! -e "$$f" ]; then \
-				install -o nobody -g adm -m 640 /dev/null "$$f"; \
+				install -v -o nobody -g adm -m 640 /dev/null "$$f"; \
 			else \
 				chown nobody:adm "$$f"; \
 				chmod 640 "$$f"; \
@@ -226,8 +226,8 @@ deploy: install-pki $(CONFS) $(NFT_SRC)
 		done; \
 	fi
 	@if [ -d /etc/fail2ban/filter.d ] && [ -d /etc/fail2ban/jail.d ]; then \
-		install -m 644 $(FAIL2BAN_FILTER) /etc/fail2ban/filter.d/; \
-		install -m 644 $(FAIL2BAN_JAIL) /etc/fail2ban/jail.d/; \
+		install -v -m 644 $(FAIL2BAN_FILTER) /etc/fail2ban/filter.d/; \
+		install -v -m 644 $(FAIL2BAN_JAIL) /etc/fail2ban/jail.d/; \
 		if systemctl is-active --quiet fail2ban.service; then \
 			fail2ban-client reload; \
 		fi; \

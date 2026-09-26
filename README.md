@@ -19,6 +19,7 @@ yourself.
 UDP is the recommended tunnel. TCP on 443 is an optional fallback when UDP is
 blocked. That public TCP port can be OpenVPN alone, OpenVPN muxing HTTPS
 (`PORT_SHARE`), or another mux with OpenVPN on a private socket (`TCP_LISTEN`).
+Why this protocol and Makefile: [Why-OpenVPN.md](Why-OpenVPN.md).
 
 Clients get a full tunnel by default, an optional LAN route and optional DNS
 pushed to them, and a symmetric, shared `tls-crypt` key. The tun is dual-stack

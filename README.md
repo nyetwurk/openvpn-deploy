@@ -45,7 +45,8 @@ your login. `REMOTE=example.com` is rejected. Omitting `REMOTE` uses
 | `UDP_POOL` / `TCP_POOL` | VPN address ranges (`address netmask`). Defaults: `10.8.19.0 255.255.255.0` UDP, `10.8.20.0 255.255.255.0` TCP |
 | `ENABLE_IPV6` | Dual-stack on the tun (`/112`, NAT66). Default `yes`. `no` writes `block-ipv6` in the profile. The listener stays IPv4 (`proto udp` / `tcp`) |
 | `UDP_POOL6` / `TCP_POOL6` | IPv6 VPN prefixes when `ENABLE_IPV6=yes` (CIDR `/112`). Empty (the default) carves a `/112` from the GUA on `WAN_IF`. Set to override (ULA or another GUA) |
-| `LAN_ROUTE` / `DNS` | LAN route and DNS pushed to clients; omit to skip. `DNS` also blocks Windows from using other resolvers |
+| `LAN_IF` | Optional LAN iface. If set and `LAN_ROUTE` is empty, push that iface's RFC1918 prefix (`address netmask`). Must not be `WAN_IF` or a tun. Explicit `LAN_ROUTE` still wins |
+| `LAN_ROUTE` / `DNS` | LAN route and DNS pushed to clients. Empty `LAN_ROUTE` skips the push unless `LAN_IF` is set. `DNS` also blocks Windows from using other resolvers |
 | `REDIRECT_GATEWAY` | Full tunnel (the default). Set empty for split tunnel (`LAN_ROUTE` only) |
 | `PORT_SHARE` | TCP only: OpenVPN muxes `TCP_PORT` toward this HTTPS daemon (`address port`). That daemon must not listen on `TCP_PORT`. Mutually exclusive with `TCP_LISTEN` |
 | `TCP_LISTEN` | TCP only: OpenVPN listens here (`address port`) when another mux owns `TCP_PORT`. Clients still dial `TCP_PORT`. Mutually exclusive with `PORT_SHARE` |
@@ -57,7 +58,7 @@ your login. `REMOTE=example.com` is rejected. Omitting `REMOTE` uses
 | `BOOTSTASH` | `auto` (default): after `make` / `make clients`, `bootstash put` if the CLI is present. `no` skips |
 
 > [!CAUTION]
-> A wrong `LAN_ROUTE` can steal a client's home or office subnet so
+> A wrong `LAN_ROUTE` or `LAN_IF` can steal a client's home or office subnet so
 > those addresses go through the VPN instead of their LAN.
 
 If you change `SERVER_CN` (or `REMOTE`, when `SERVER_CN` is unset)
@@ -94,8 +95,8 @@ tunnel is up. This Makefile does not install the package. `PORT_SHARE` and
 ## Firewall/Routing
 
 A LAN host that dials the WAN address hits this machine directly (no
-hairpin). With `LAN_ROUTE` set, other LAN destinations go through the
-tunnel.
+hairpin). With `LAN_ROUTE` set (including when `LAN_IF` fills it), other
+LAN destinations go through the tunnel.
 
 `make` writes both fragments: `server/openvpn.nft` from
 [`openvpn.nft.in`](openvpn.nft.in) and `server/openvpn-nat.nft` from

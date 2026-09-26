@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import pwd
 import re
@@ -29,6 +30,12 @@ from pathlib import Path
 
 PLACEHOLDER = re.compile(r"@[A-Z][A-Z0-9_]*@")
 ASSIGN = re.compile(r"^([A-Z][A-Z0-9_]*)\s*=\s*(.*)$")
+IFNAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,14}$")
+RFC1918 = (
+    ipaddress.IPv4Network("10.0.0.0/8"),
+    ipaddress.IPv4Network("172.16.0.0/12"),
+    ipaddress.IPv4Network("192.168.0.0/16"),
+)
 SITE_CONF = Path(os.environ.get("SITE_CONF", "site.conf"))
 
 DEFAULTS = {
@@ -46,6 +53,7 @@ DEFAULTS = {
     "UDP_POOL6": "",
     "TCP_POOL6": "",
     "LAN_ROUTE": "",
+    "LAN_IF": "",
     "DNS": "",
     "STATE_DIR": "/var/lib/openvpn-server",
     "UDP_IPP": "",
@@ -152,6 +160,29 @@ def with_value(value: str, fmt: str) -> str:
     return fmt.format(value) if value else ""
 
 
+def two_words(value: str, key: str, form: str) -> tuple[str, str]:
+    parts = value.split()
+    if len(parts) != 2:
+        die(f"gen-config.py: {key} must be '{form}'")
+    return parts[0], parts[1]
+
+
+def parse_route_words(value: str, key: str) -> ipaddress.IPv4Network:
+    addr, mask = two_words(value, key, "address netmask")
+    try:
+        net = ipaddress.IPv4Network(f"{addr}/{mask}", strict=False)
+    except ValueError as exc:
+        die(f"gen-config.py: {key}: {exc}")
+    return net
+
+
+def require_ifname(ifname: str, key: str) -> str:
+    ifname = ifname.strip()
+    if not IFNAME.match(ifname):
+        die(f"gen-config.py: {key}={ifname!r} is not an interface name")
+    return ifname
+
+
 def hostname_f() -> str:
     try:
         remote = subprocess.check_output(["hostname", "-f"], text=True).strip()
@@ -217,6 +248,12 @@ def load_site() -> dict[str, str]:
     if cfg["DUPLICATE_CN"] not in ("yes", "no"):
         die("gen-config.py: DUPLICATE_CN must be yes or no")
     fill_empty(cfg, "WAN_IF", DEFAULTS["WAN_IF"])
+    cfg["WAN_IF"] = require_ifname(cfg["WAN_IF"], "WAN_IF")
+    apply_lan_if(cfg)
+    for proto in enabled_protos(cfg):
+        key = f"{proto.upper()}_POOL"
+        cfg[key] = cfg[key].strip()
+        parse_route_words(cfg[key], key)
     cfg["NFT_MODE"] = cfg["NFT_MODE"].strip()
     cfg["NFT_DEST"] = cfg["NFT_DEST"].strip()
     fill_empty(cfg, "NFT_MODE", DEFAULTS["NFT_MODE"])
@@ -270,17 +307,6 @@ def proto_val(cfg: dict[str, str], proto: str, name: str) -> str:
     return cfg[f"{proto.upper()}_{name}"]
 
 
-def pool_to_cidr(pool: str) -> str:
-    parts = pool.split()
-    if len(parts) != 2:
-        die(f"gen-config.py: expected 'address netmask' pool, got {pool!r}")
-    addr, mask = parts
-    try:
-        return str(ipaddress.IPv4Network(f"{addr}/{mask}", strict=False))
-    except ValueError as exc:
-        die(f"gen-config.py: {exc}")
-
-
 def wan_gua(ifname: str) -> ipaddress.IPv6Interface | None:
     path = Path("/proc/net/if_inet6")
     if not path.is_file():
@@ -312,6 +338,88 @@ def wan_gua(ifname: str) -> ipaddress.IPv6Interface | None:
     return cands[0][1]
 
 
+def is_rfc1918(addr: ipaddress.IPv4Address) -> bool:
+    return any(addr in net for net in RFC1918)
+
+
+def is_tun_iface(ifname: str) -> bool:
+    return Path(f"/sys/class/net/{ifname}/tun_flags").exists()
+
+
+def ipv4_on_iface(ifname: str, key: str) -> list[ipaddress.IPv4Interface]:
+    try:
+        raw = subprocess.check_output(
+            ["ip", "-4", "-json", "addr", "show", "dev", ifname],
+            text=True,
+            stderr=subprocess.STDOUT,
+        )
+    except FileNotFoundError:
+        die("gen-config.py: ip not found (iproute2)")
+    except subprocess.CalledProcessError as exc:
+        err = (exc.output or str(exc)).strip() or "interface is missing"
+        die(f"gen-config.py: {key}={ifname}: {err}")
+    if not raw.strip():
+        return []
+    try:
+        links = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        die(f"gen-config.py: ip -json: {exc}")
+    out: list[ipaddress.IPv4Interface] = []
+    for link in links:
+        for info in link.get("addr_info") or []:
+            if info.get("family") != "inet":
+                continue
+            local = info.get("local")
+            plen = info.get("prefixlen")
+            if local is None or plen is None:
+                continue
+            try:
+                out.append(ipaddress.IPv4Interface(f"{local}/{int(plen)}"))
+            except ValueError:
+                continue
+    return out
+
+
+def rfc1918_nets(ifaces: list[ipaddress.IPv4Interface]) -> list[ipaddress.IPv4Network]:
+    nets = {iface.network for iface in ifaces if is_rfc1918(iface.ip)}
+    return sorted(nets, key=lambda n: (int(n.network_address), n.prefixlen))
+
+
+def route_words(net: ipaddress.IPv4Network) -> str:
+    return f"{net.network_address} {net.netmask}"
+
+
+def apply_lan_if(cfg: dict[str, str]) -> None:
+    ifname = cfg["LAN_IF"].strip()
+    route = cfg["LAN_ROUTE"].strip()
+    cfg["LAN_ROUTE"] = route
+    if not ifname:
+        cfg["LAN_IF"] = ""
+        return
+    ifname = require_ifname(ifname, "LAN_IF")
+    cfg["LAN_IF"] = ifname
+    if ifname == cfg["WAN_IF"]:
+        die(f"gen-config.py: LAN_IF={ifname} is the same as WAN_IF")
+    tuns = {cfg["UDP_DEV"].strip(), cfg["TCP_DEV"].strip()}
+    if ifname in tuns or is_tun_iface(ifname):
+        die(f"gen-config.py: LAN_IF={ifname} is a tun")
+    nets = rfc1918_nets(ipv4_on_iface(ifname, "LAN_IF"))
+    if not nets:
+        die(f"gen-config.py: LAN_IF={ifname} has no RFC1918 IPv4")
+    if len(nets) > 1:
+        shown = ", ".join(str(n) for n in nets)
+        die(f"gen-config.py: LAN_IF={ifname} has several RFC1918 prefixes: {shown}")
+    derived = route_words(nets[0])
+    if not route:
+        cfg["LAN_ROUTE"] = derived
+        return
+    if parse_route_words(route, "LAN_ROUTE") != nets[0]:
+        die(
+            f"gen-config.py: LAN_ROUTE ({route}) does not match "
+            f"LAN_IF={ifname} ({derived})"
+        )
+
+
 def pool6_from_wan(wan: ipaddress.IPv6Interface, tag: int) -> str:
     net = wan.network
     if net.prefixlen > 96:
@@ -332,10 +440,7 @@ def pool6_from_wan(wan: ipaddress.IPv6Interface, tag: int) -> str:
 
 
 def require_ipv4_host_port(value: str, key: str) -> tuple[str, str]:
-    parts = value.split()
-    if len(parts) != 2:
-        die(f"gen-config.py: {key} must be 'address port'")
-    host, port = parts
+    host, port = two_words(value, key, "address port")
     try:
         ipaddress.IPv4Address(host)
     except ValueError:
@@ -418,7 +523,10 @@ def nft_listener_sets(cfg: dict[str, str]) -> tuple[str, str, str]:
     if not protos:
         die("gen-config.py nft: no listeners (ENABLE_UDP/ENABLE_TCP)")
     ifaces = [proto_val(cfg, p, "DEV") for p in protos]
-    cidrs = [pool_to_cidr(proto_val(cfg, p, "POOL")) for p in protos]
+    cidrs = [
+        str(parse_route_words(proto_val(cfg, p, "POOL"), f"{p.upper()}_POOL"))
+        for p in protos
+    ]
     v6_define = ""
     if cfg["ENABLE_IPV6"] == "yes":
         cidrs6 = [proto_val(cfg, p, "POOL6") for p in protos]

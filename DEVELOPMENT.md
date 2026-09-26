@@ -59,6 +59,12 @@ here. `NFT_MODE` is `vps` or `nat` (empty becomes `vps`).
 `NFT_DEST` is empty or an absolute path. Empty `NFT_DEST` skips the
 nft copy. `NFT_MODE=nat` with an empty `NFT_DEST` dies. `vps`
 selects `server/openvpn.nft`. `nat` selects `server/openvpn-nat.nft`.
+`LAN_IF` is empty (off) or an interface name. When set, empty
+`LAN_ROUTE` becomes that iface's only RFC1918 IPv4 prefix
+(`address netmask`). Explicit `LAN_ROUTE` still wins; both set
+and they disagree, gen-config dies. `LAN_IF` may not be `WAN_IF`
+or a tun. No RFC1918 or several RFC1918 prefixes on that iface
+dies.
 
 Templates use `@NAME@`. Unset or leftover names fail. Do not edit
 generated files under `server/` or `client/`.

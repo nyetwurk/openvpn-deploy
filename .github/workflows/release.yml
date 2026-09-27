@@ -1,0 +1,73 @@
+# Tag push: archive that commit and publish.
+# *-rc* → prerelease; otherwise a full release.
+# workflow_dispatch builds the artifact and does not publish.
+# The VM does not fetch this release. The operator hosts the file.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: git archive
+        run: |
+          set -euo pipefail
+          name="openvpn-deploy-${GITHUB_REF_NAME}.tar.gz"
+          git archive --prefix=openvpn-deploy/ --output="$name" HEAD
+          sha256sum "$name" | tee "${name}.sha256"
+          tar -tzf "$name" | grep -qx 'openvpn-deploy/vps/install.sh'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: openvpn-deploy-${{ github.ref_name }}
+          path: openvpn-deploy-*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [ archive ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: taiki-e/install-action@git-cliff
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: openvpn-deploy-${{ github.ref_name }}
+          path: artifacts
+      - name: Release notes
+        env:
+          # Tag checkout is a detached HEAD. git-cliff only reads
+          # remote.github.* from GITHUB_REPO in that case.
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME}" == *-rc* ]]; then
+            git-cliff --strip header --current > release-notes.md
+          else
+            git-cliff --strip header --current \
+              --tag-pattern '^v[0-9]+\.[0-9]+\.[0-9]+$' > release-notes.md
+          fi
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') }}
+          make_latest: ${{ !contains(github.ref_name, '-rc') }}
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.sha256

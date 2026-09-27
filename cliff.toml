@@ -1,0 +1,74 @@
+# git-cliff ~ configuration file
+# https://git-cliff.org/docs/configuration
+
+[changelog]
+# Body template: group_by(group) for sections, group_by(message) for dedup.
+# Uses pr_title when available; replace_regex links #N (preprocessors only run on message).
+body = """
+## What's Changed
+
+{%- if version %} in {{ version | trim_start_matches(pat="v") }}{%- else %} (since {{ previous.version | default(value="initial") }}){%- endif -%}
+{%- for group, group_commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim }}
+{% for msg, dupes in group_commits | group_by(attribute="message") -%}
+  {%- set commit = dupes | first -%}
+  {%- if commit.remote.pr_title -%}
+    {%- set commit_message = commit.remote.pr_title -%}
+  {%- else -%}
+    {%- set commit_message = commit.message -%}
+  {%- endif %}
+  * {{ commit_message | split(pat="\n") | first | trim | replace_regex(from="(^|[^\\[])#([0-9]+)", to=["$1[#$2](", self::remote_url(), "/issues/$2)"] | join(sep="")) }}\
+    {%- if commit.remote.username %} by @{{ commit.remote.username }}{% endif -%}
+    {%- if commit.remote.pr_number %} in [#{{ commit.remote.pr_number }}]({{ self::remote_url() }}/pull/{{ commit.remote.pr_number }}){% endif %}
+{%- endfor -%}
+{% raw %}
+{% endraw -%}
+{%- endfor -%}
+
+{% if version %}
+    {% if previous.version %}
+      **Full Changelog**: {{ self::remote_url() }}/compare/{{ previous.version }}...{{ version }}
+    {% endif %}
+{% else -%}
+  {% raw %}\n{% endraw %}
+{% endif %}
+
+{%- macro remote_url() -%}
+  https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}
+{%- endmacro -%}
+"""
+# Remove leading and trailing whitespaces from the changelog's body.
+trim = true
+
+[git]
+# Explicit parsers assign groups. conventional_commits default groups lack the order prefix.
+conventional_commits = false
+# Include unconventional commits; do not exclude them.
+filter_unconventional = false
+# Treat each commit as one; do not split on newlines.
+split_commits = false
+# Group commits by type. Prefix "<!-- N -->" controls section order (stripped in template).
+# Parsers follow that section order. First match wins.
+# "^Merge pull request" sits above ".*", or those merges land in Other.
+# ".*" matches everything, so it stays last.
+commit_parsers = [
+  { message = "(?i)^feat", group = "<!-- 00 -->Features" },
+  { message = "(?i)^fix", group = "<!-- 01 -->Bug Fixes" },
+  { message = "(?i)^docs?", group = "<!-- 02 -->Documentation" },
+  { message = "(?i)^test", group = "<!-- 03 -->Testing" },
+  { message = "(?i)^ci", group = "<!-- 04 -->CI" },
+  { message = "^Merge pull request", skip = true },
+  { message = ".*", group = "<!-- 05 -->Other" },
+]
+# Rewrite commit messages before display: (#123) → link; bare #123 → link (avoids matching inside [...])
+# Note: replace strings are not Tera-evaluated; URLs here stay hardcoded. Template uses remote_url().
+commit_preprocessors = [
+  { pattern = '\\(#([0-9]+)\\)', replace = "([#$1](https://github.com/nyetwurk/openvpn-deploy/issues/$1))" },
+  { pattern = "(^|[^\\[])#([0-9]+)", replace = "$1[#$2](https://github.com/nyetwurk/openvpn-deploy/issues/$2)" },
+]
+# Include commits that do not match any commit_parser (they go to "Other").
+filter_commits = false
+# Order of commits in each group/release within the changelog.
+sort_commits = "newest"
+# Frozen: vX.Y.Z and vX.Y.Z-rcN only.
+tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+(-rc[0-9]+)?$"

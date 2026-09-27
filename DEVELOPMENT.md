@@ -51,7 +51,7 @@ same as the v4 pools). No GUA there dies. Explicit CIDR still
 wins. Unknown values die. The listener stays `proto udp` / `tcp`.
 `no` is v4-only (`block-ipv6`). Still NAT66, not a routed `/64`.
 `BOOTSTASH` is `auto` or `no` (empty becomes `auto`). After
-`clients`, `auto` runs `bootstash put -t .` when the CLI is on
+`clients`, `auto` runs `bootstash put` when the CLI is on
 `PATH`, `/usr/sbin`, or `/usr/local/sbin`. Missing CLI or a failed
 put does not fail `make`. `BOOTSTASH_CLI` overrides the binary.
 `make bootstash` requires a successful put. Do not parse `$DATA`

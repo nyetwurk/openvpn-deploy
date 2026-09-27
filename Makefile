@@ -100,8 +100,8 @@ maybe-bootstash:
 		exit 0; \
 	fi; \
 	$(NEED_USER); \
-	echo "$$cli put -t . $(CLIENT_OVPNS)"; \
-	$$cli put -t . $(CLIENT_OVPNS) || echo "bootstash put failed; profiles remain in client/"
+	echo "$$cli put $(CLIENT_OVPNS)"; \
+	$$cli put $(CLIENT_OVPNS) || echo "bootstash put failed; profiles remain in client/"
 
 bootstash: $(CLIENT_OVPNS)
 	@$(NEED_USER)
@@ -113,8 +113,8 @@ bootstash: $(CLIENT_OVPNS)
 	fi; \
 	test -n "$$cli" || { echo "bootstash CLI not found (PATH, /usr/sbin, /usr/local/sbin)"; exit 1; }; \
 	test -n "$(CLIENT_OVPNS)" || { echo "no client profiles"; exit 1; }; \
-	echo "$$cli put -t . $(CLIENT_OVPNS)"; \
-	$$cli put -t . $(CLIENT_OVPNS)
+	echo "$$cli put $(CLIENT_OVPNS)"; \
+	$$cli put $(CLIENT_OVPNS)
 
 server/server-%.conf: $(CONF_DEPS)
 	./gen-config.py server $* $@

@@ -14,6 +14,47 @@ templates, `gen-config.py`, or the Makefile.
   `BOOTSTASH`, `NFT_MODE`, `NFT_DEST`. Does not `include`
   `site.conf`. `IPP_FILES` is empty when `DUPLICATE_CN=yes`
 
+`make cloud-init` writes `launch/cloud-init.yaml` from `vps.yaml`.
+The launch scripts run that target first, unless a user-data file is
+passed.
+It does not read `site.conf`. `vps.yaml` holds the droplet site knobs
+plus the archive URL, bootstash deb, and `ACME_EMAIL`. Omitted
+`NFT_MODE` is `vps` and omitted `NFT_DEST` is
+`/etc/nftables.d/50-openvpn.nft` (an explicit empty `NFT_DEST` skips
+the copy). Omitted `ACME_STAGING` is production. `PROVISION` is `pam` or
+`google` (omitted means `pam`). It is not copied into user-data.
+The launch scripts read `PROVISION` from `vps.yaml`. Omitted
+`IMAGE_USER` is the current login name. That account is created on
+the droplet with sudo, adm, and the SSH key, and `make` runs as that user.
+Omitted
+`SSH_AUTHORIZED_KEYS` is the first public key in `~/.ssh`
+(`id_ed25519.pub`, then the other OpenSSH default names). The
+generated file names that path above `ssh_authorized_keys`. The
+user-data embeds a generated `site.conf` (site knobs only). The
+droplet then runs the same `make` / `sudo make deploy`. `make deploy`
+does not run `cloud-init`. Omitted `ENABLE_IPV6` follows the WAN:
+a global IPv6 selects `yes`, and none selects `no`. An explicit
+`yes` still requires a GUA or a pool. The boot
+log prints each step, including `DNS got` against `DNS want`.
+The image installs `ssl-cert` before the bootstash package.
+`bootstash.service` sets `SupplementaryGroups=ssl-cert`, and systemd
+will not start the unit when that group is missing (`216/GROUP`).
+Debian's `/etc/nftables.conf` is kept; the script appends the
+`/etc/nftables.d` include when it is missing. This command needs
+`python3-yaml` on the operator machine. `launch/create-vm-do.sh` needs `doctl` on `PATH`:
+
+```sh
+go install github.com/digitalocean/doctl/cmd/doctl@latest
+```
+
+The binary is `$(go env GOPATH)/bin/doctl`. Then `doctl auth init`.
+`launch/create-vm-gce.sh` needs `gcloud` (`gcloud auth login` and
+`gcloud config set project`). `launch/create-vm-aws.sh` needs the
+`aws` CLI (`aws configure`) and a default VPC. Those scripts, the
+local guest, and the DigitalOcean script share `launch/guest.sh`
+for the SSH login. A guest with no public address does not wait
+for a certificate.
+
 `DEST`, `EASYRSA`, `OPENVPN`, `CERT_DAYS`, and `BOOTSTASH_CLI` stay
 Makefile-only. `CLIENTS` and `BOOTSTASH` are site.conf options
 (emitted into `server/vars.mk`). Site knobs are not `make VAR=…`.
@@ -29,6 +70,7 @@ Make stops before PKI or confs.
 ```sh
 ./gen-config.py init-site
 ./gen-config.py make-vars [OUT]
+./gen-config.py cloud-init [OUT]
 ./gen-config.py server udp|tcp [OUT]
 ./gen-config.py nft [OUT]
 ./gen-config.py nft-nat [OUT]
@@ -41,21 +83,24 @@ Make stops before PKI or confs.
 `REMOTE`. Empty `UDP_IPP` / `TCP_IPP` follow `STATE_DIR`.
 `DUPLICATE_CN` is `yes` or `no` (empty becomes `no`). `yes` emits
 `duplicate-cn` and leaves persist / `IPP_FILES` empty.
-`ENABLE_IPV6` is `yes` or `no` (empty becomes `yes`). `yes` emits
+`ENABLE_IPV6` is `yes` or `no`. Omitted, it is `yes` when `WAN_IF`
+has a global IPv6 and `no` otherwise. `yes` emits
 `server-ipv6` (`/112` ULA or GUA), folds `ipv6` into the existing
 `redirect-gateway` push, full-tunnel `route-ipv6 2000::/3` when
 `REDIRECT_GATEWAY` is set, and omits `block-ipv6` from the client
 profile. Empty `UDP_POOL6` / `TCP_POOL6` for an enabled listener
 becomes a `/112` inside the GUA on `WAN_IF` (tags `19` / `20`,
-same as the v4 pools). No GUA there dies. Explicit CIDR still
+same as the v4 pools). Omitted with no GUA and no pool is `no`.
+Explicit `yes` with no GUA and no pool dies. Explicit CIDR still
 wins. Unknown values die. The listener stays `proto udp` / `tcp`.
 `no` is v4-only (`block-ipv6`). Still NAT66, not a routed `/64`.
 `BOOTSTASH` is `auto` or `no` (empty becomes `auto`). After
-`clients`, `auto` runs `bootstash put` when the CLI is on
-`PATH`, `/usr/sbin`, or `/usr/local/sbin`. Missing CLI or a failed
-put does not fail `make`. `BOOTSTASH_CLI` overrides the binary.
-`make bootstash` requires a successful put. Do not parse `$DATA`
-here. `NFT_MODE` is `vps` or `nat` (empty becomes `vps`).
+`clients`, `auto` runs `sudo -n bootstash mkdir` for the user
+running `make`, then `bootstash put`, when the CLI is on
+`PATH`, `/usr/sbin`, or `/usr/local/sbin`. Missing CLI, a refused
+sudo, a failed `mkdir`, or a failed put does not fail `make`. `BOOTSTASH_CLI` overrides
+the binary. `make bootstash` requires both commands to succeed. Do
+not parse `$DATA` here. `NFT_MODE` is `vps` or `nat` (empty becomes `vps`).
 `NFT_DEST` is empty or an absolute path. Empty `NFT_DEST` skips the
 nft copy. `NFT_MODE=nat` with an empty `NFT_DEST` dies. `vps`
 selects `server/openvpn.nft`. `nat` selects `server/openvpn-nat.nft`.

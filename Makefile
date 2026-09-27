@@ -68,7 +68,7 @@ CONF_DEPS := server.conf.in gen-config.py $(SITE_CONF)
 BOOTSTASH_CLI ?=
 
 .DEFAULT_GOAL := all
-.PHONY: all confs pki pki-clean clean distclean clients maybe-bootstash bootstash dryrun deploy install-pki revoke
+.PHONY: all confs pki pki-clean clean distclean clients maybe-bootstash bootstash dryrun deploy install-pki revoke cloud-init
 .SECONDARY:
 
 all: confs pki clients
@@ -87,8 +87,9 @@ pki: $(CA_CRT) $(SERVER_CRT) $(TC_KEY) $(CRL)
 clients: $(CLIENT_OVPNS)
 	@$(if $(filter no,$(BOOTSTASH)),:,$(MAKE) --no-print-directory maybe-bootstash)
 
-# BOOTSTASH=auto (default): put when the CLI exists. Failures stay in client/.
-# BOOTSTASH=no: skip. make bootstash requires a successful put.
+# BOOTSTASH=auto (default): mkdir then put when the CLI exists.
+# Failures stay in client/. BOOTSTASH=no: skip.
+# make bootstash requires both commands to succeed.
 maybe-bootstash:
 	@cli="$(BOOTSTASH_CLI)"; \
 	if [ -z "$$cli" ]; then \
@@ -100,12 +101,16 @@ maybe-bootstash:
 		exit 0; \
 	fi; \
 	$(NEED_USER); \
+	user=$$(id -un); \
+	echo "sudo -n $$cli mkdir $$user"; \
+	sudo -n "$$cli" mkdir "$$user" || echo "bootstash mkdir failed; profiles remain in client/"; \
 	echo "$$cli put $(CLIENT_OVPNS)"; \
 	$$cli put $(CLIENT_OVPNS) || echo "bootstash put failed; profiles remain in client/"
 
 bootstash: $(CLIENT_OVPNS)
 	@$(NEED_USER)
-	@cli="$(BOOTSTASH_CLI)"; \
+	@set -e; \
+	cli="$(BOOTSTASH_CLI)"; \
 	if [ -z "$$cli" ]; then \
 		cli=$$({ command -v bootstash 2>/dev/null && exit 0; \
 			test -x /usr/sbin/bootstash && echo /usr/sbin/bootstash && exit 0; \
@@ -113,6 +118,9 @@ bootstash: $(CLIENT_OVPNS)
 	fi; \
 	test -n "$$cli" || { echo "bootstash CLI not found (PATH, /usr/sbin, /usr/local/sbin)"; exit 1; }; \
 	test -n "$(CLIENT_OVPNS)" || { echo "no client profiles"; exit 1; }; \
+	user=$$(id -un); \
+	echo "sudo -n $$cli mkdir $$user"; \
+	sudo -n "$$cli" mkdir "$$user"; \
 	echo "$$cli put $(CLIENT_OVPNS)"; \
 	$$cli put $(CLIENT_OVPNS)
 
@@ -204,6 +212,14 @@ install-pki:
 	install -m 600 "$(SERVER_KEY)" "$(DEST)/easy-rsa/pki/private/"
 	install -m 600 "$(TC_KEY)" "$(DEST)/tc.key"
 	install -m 644 "$(CRL)" "$(DEST)/crl.pem"
+
+# Droplet user-data from vps.yaml. Does not read site.conf.
+# Not part of make deploy.
+cloud-init: vps.yaml gen-config.py
+	./gen-config.py cloud-init launch/cloud-init.yaml
+
+vps.yaml:
+	@echo "copy examples/vps.yaml to vps.yaml and fill it" >&2; exit 1
 
 deploy: install-pki $(CONFS) $(NFT_SRC)
 	@test "$$(id -u)" -eq 0 || { echo "need root: sudo make deploy"; exit 1; }

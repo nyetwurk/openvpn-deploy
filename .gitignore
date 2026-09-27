@@ -9,3 +9,6 @@ easy-rsa/pki/
 server/
 client/
 /site.conf
+/vps.yaml
+/launch/cloud-init.yaml
+/local-vm/

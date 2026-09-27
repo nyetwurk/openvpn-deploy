@@ -23,8 +23,8 @@ Why this protocol and Makefile: [Why-OpenVPN.md](Why-OpenVPN.md).
 
 Clients get a full tunnel by default, an optional LAN route and optional DNS
 pushed to them, and a symmetric, shared `tls-crypt` key. The tun is dual-stack
-by default (a `/112` from the WAN GUA, NAT66). `ENABLE_IPV6=no` blocks client
-IPv6.
+when `WAN_IF` has a global IPv6 (a `/112` from that GUA, NAT66).
+With no global IPv6, or with `ENABLE_IPV6=no`, clients get `block-ipv6`.
 
 ## Configuration
 
@@ -43,7 +43,7 @@ your login. `REMOTE=example.com` is rejected. Omitting `REMOTE` uses
 | `UDP_PORT` / `TCP_PORT` | Ports clients dial (`1194` / `443`). TCP listen port unless `TCP_LISTEN` is set |
 | `UDP_DEV` / `TCP_DEV` | TUN devices (`tun0` / `tun1`) |
 | `UDP_POOL` / `TCP_POOL` | VPN address ranges (`address netmask`). Defaults: `10.8.19.0 255.255.255.0` UDP, `10.8.20.0 255.255.255.0` TCP |
-| `ENABLE_IPV6` | Dual-stack on the tun (`/112`, NAT66). Default `yes`. `no` writes `block-ipv6` in the profile. The listener stays IPv4 (`proto udp` / `tcp`) |
+| `ENABLE_IPV6` | Dual-stack on the tun (`/112`, NAT66). Omitted: `yes` when `WAN_IF` has a global IPv6, otherwise `no`. Explicit `yes` still needs that GUA or a pool. `no` writes `block-ipv6`. The listener stays IPv4 (`proto udp` / `tcp`) |
 | `UDP_POOL6` / `TCP_POOL6` | IPv6 VPN prefixes when `ENABLE_IPV6=yes` (CIDR `/112`). Empty (the default) carves a `/112` from the GUA on `WAN_IF`. Set to override (ULA or another GUA) |
 | `LAN_IF` | Optional LAN iface. If set and `LAN_ROUTE` is empty, push that iface's RFC1918 prefix (`address netmask`). Must not be `WAN_IF` or a tun. Explicit `LAN_ROUTE` still wins |
 | `LAN_ROUTE` / `DNS` | LAN route and DNS pushed to clients. Empty `LAN_ROUTE` skips the push unless `LAN_IF` is set. `DNS` also blocks Windows from using other resolvers |
@@ -55,7 +55,7 @@ your login. `REMOTE=example.com` is rejected. Omitting `REMOTE` uses
 | `NFT_DEST` | Absolute path to copy that fragment to (`0755`). Empty skips the copy. Does not `nft -f`. `make dryrun` diffs this path against the fragment |
 | `CLIENTS` | Who gets a profile. Space-separated names. Defaults to your login |
 | `DUPLICATE_CN` | `yes` allows several live sessions with the same client cert (shared `.ovpn`) and omits pool persist. Default `no` |
-| `BOOTSTASH` | `auto` (default): after `make` / `make clients`, `bootstash put` if the CLI is present. `no` skips |
+| `BOOTSTASH` | `auto` (default): after `make` / `make clients`, `sudo -n bootstash mkdir` for the current user, then `bootstash put`, if the CLI is present. `no` skips |
 
 > [!CAUTION]
 > A wrong `LAN_ROUTE` or `LAN_IF` can steal a client's home or office subnet so
@@ -86,8 +86,11 @@ Import the profile in **OpenVPN Connect**. On mobile the action is
 sometimes labeled **Upload**; that means import.
 
 [bootstash](https://github.com/nyetwurk/bootstash) is optional (Google
-OIDC + PAM in a browser). `BOOTSTASH=auto` puts into the local cubby
-when the CLI is present; the cubby exists after a PAM link. `scp` if
+OIDC + PAM in a browser). `BOOTSTASH=auto` runs
+`sudo -n bootstash mkdir` for the current user, then `bootstash put`,
+when the CLI is present. `bootstash mkdir` creates `users/<name>`. A missing
+command, a refused sudo, or a failed `mkdir` leaves the profiles in
+`client/`. `scp` if
 the cubby is elsewhere. The phone must reach that host *before* the
 tunnel is up. This Makefile does not install the package. `PORT_SHARE` and
 `TCP_LISTEN` are not a profile server.
@@ -145,10 +148,10 @@ only flushes those. It does not flush forward. It defines the tun
 sets from `site.conf` and uses the parent's `WAN_*` and `LAN_*`
 addresses. DNS intercept to the LAN resolver is in that file.
 
-Dual-stack (the default) needs a public IPv6 on `WAN_IF`. Empty
-`UDP_POOL6` / `TCP_POOL6` take a `/112` from that GUA and SNAT it
-to that GUA (not a routed `/64`, not nft masquerade). Set
-`ENABLE_IPV6=no` if the WAN is IPv4-only. An explicit ULA pool still
+Omitted `ENABLE_IPV6` is dual-stack when `WAN_IF` has a public IPv6,
+and v4-only when it does not. Empty `UDP_POOL6` / `TCP_POOL6` take a
+`/112` from that GUA and SNAT it to that GUA (not a routed `/64`,
+not nft masquerade). An explicit ULA pool still
 loses to IPv4 (RFC 6724).
 
 > [!WARNING]
@@ -179,8 +182,8 @@ Run `make` as a normal user, then `sudo make deploy`.
 
 - `make` — server configs, certificates, and profiles for `CLIENTS`
 - `make clients` — `client/name.ovpn` and/or `client/name.tcp.ovpn`
-  (both also `bootstash put` when `BOOTSTASH=auto` and the CLI is present)
-- `make bootstash` — `bootstash put` only (fails if the CLI is missing)
+  (both also `bootstash mkdir` and `bootstash put` when `BOOTSTASH=auto` and the CLI is present)
+- `make bootstash` — `bootstash mkdir` then `bootstash put` (fails if the CLI is missing or either command fails)
 - `sudo make deploy` — install configs and certificates, create
   address-assignment files, restart the enabled units. Copies the
   nft fragment to `NFT_DEST` when that path is set (does not

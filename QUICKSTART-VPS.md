@@ -19,9 +19,10 @@ That writes `site.conf` with `REMOTE` from `hostname -f` and stops.
 
 - Edit `site.conf` to your needs.
 - Set `WAN_IF` if the WAN is not `eth0`.
-- Dual-stack is the default and needs a public IPv6 on that WAN
-  (NAT66, not a routed `/64`). Empty pools take a `/112` from that
-  GUA. Set `ENABLE_IPV6=no` if the WAN is IPv4-only. The sysctl
+- Omitted `ENABLE_IPV6` follows that WAN. A global IPv6 means
+  dual-stack (NAT66, not a routed `/64`); empty pools take a `/112`
+  from that GUA. No global IPv6 means v4-only. Set `yes` or `no` to
+  override. The sysctl
   example sets `accept_ra=2` so `forwarding=1` does not drop a
   SLAAC WAN default.
 
@@ -31,11 +32,12 @@ available options.
 
 ## Configure nftables
 
-Debian's stock `/etc/nftables.conf` does not include
-`/etc/nftables.d/`. The OpenVPN fragment expects `inet filter` to
-already exist, and boot-time load needs this include. If
-`/etc/nftables.conf` already has `include "/etc/nftables.d/*.nft"`,
-skip the copy.
+Debian's stock `/etc/nftables.conf` is a live ruleset (an uncommented
+`inet filter` table). It does not include `/etc/nftables.d/`. The
+OpenVPN fragment expects `inet filter` to already exist, and
+boot-time load needs this include. `vps/provision.sh` leaves that
+file in place and appends `include "/etc/nftables.d/*.nft"` when the
+line is missing. If the include is already there, skip the copy.
 
 If `/etc/nftables.conf` already has host rules (not just an include),
 move those rules into a snippet under `/etc/nftables.d/` (for example
@@ -60,7 +62,8 @@ sudo systemctl enable --now nftables
 
 The next `make` builds server confs, certificates, profiles, and
 `server/openvpn.nft`. `BOOTSTASH=auto` (the default) also runs
-`bootstash put` when the CLI is on this host.
+`sudo -n bootstash mkdir` for the current user, then `bootstash put`,
+when the CLI is on this host.
 
 ```sh
 make

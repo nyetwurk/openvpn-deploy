@@ -1,0 +1,34 @@
+# Droplet config. Copy to vps.yaml in the repo root and fill it.
+# make cloud-init writes launch/cloud-init.yaml from that file.
+# It does not read site.conf. Site keys here are written into the
+# site.conf the droplet uses. Omitted site keys are filled on the VM.
+# Omitted ENABLE_IPV6 follows the WAN on the droplet. A global IPv6
+# means yes. None means no. Set yes or no to override.
+# Do not put the Google client JSON in this file.
+
+# Omitted defaults:
+# NFT_MODE: vps
+# NFT_DEST: /etc/nftables.d/50-openvpn.nft
+#   NFT_DEST: "" skips the copy. NFT_MODE: nat needs an explicit NFT_DEST.
+# ACME_STAGING: true   Let's Encrypt staging. Omitted means production.
+# PROVISION: pam
+#   Prompts for the image user's password. Not copied into user-data.
+# PROVISION: google   pipes the client JSON instead.
+# IMAGE_USER is the current login name. That account is created on the
+# droplet in groups sudo and adm, with the SSH key. PAM login uses it.
+# SSH_AUTHORIZED_KEYS is the first ~/.ssh public key.
+# launch/cloud-init.yaml names that file.
+# (id_ed25519.pub, then id_ecdsa.pub, id_ecdsa_sk.pub, id_ed25519_sk.pub, id_rsa.pub).
+# SSH_AUTHORIZED_KEYS:
+#   - ssh-ed25519 AAAA... you@host
+
+# Hostname clients dial. example.com is rejected.
+REMOTE: vpn.my-vps.com
+ACME_EMAIL: acme@example.com
+
+# Archive of this tree. One top-level directory (git archive --prefix).
+# Empty SHA skips the check.
+ARCHIVE_URL: https://example.com/openvpn-deploy.tar.gz
+ARCHIVE_SHA256: ""
+BOOTSTASH_DEB_URL: https://example.com/bootstash.deb
+BOOTSTASH_DEB_SHA256: ""

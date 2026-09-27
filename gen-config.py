@@ -70,6 +70,31 @@ DEFAULTS = {
     "NFT_DEST": "",
 }
 
+# Droplet launch. vps.yaml only. Not written into the generated site.conf.
+LAUNCH_KEYS = (
+    "ARCHIVE_URL",
+    "ARCHIVE_SHA256",
+    "BOOTSTASH_DEB_URL",
+    "BOOTSTASH_DEB_SHA256",
+    "ACME_EMAIL",
+    "ACME_STAGING",
+    "SSH_AUTHORIZED_KEYS",
+    "IMAGE_USER",
+)
+# Laptop-only. Not written into cloud-init.yaml.
+LOCAL_KEYS = ("PROVISION",)
+VPS_YAML = Path(os.environ.get("VPS_YAML", "vps.yaml"))
+# Applied when vps.yaml omits them. An explicit NFT_DEST: "" skips the copy.
+VPS_NFT_DEST = "/etc/nftables.d/50-openvpn.nft"
+USER_NAME = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+SSH_PUB_PREFERENCE = (
+    "id_ed25519.pub",
+    "id_ecdsa.pub",
+    "id_ecdsa_sk.pub",
+    "id_ed25519_sk.pub",
+    "id_rsa.pub",
+)
+
 
 class AtTemplate(string.Template):
     delimiter = "@"
@@ -144,6 +169,15 @@ def expect_argv(argv: list[str], usage_msg: str, min_n: int = 0, max_n: int = 0)
 
 def out_path(argv: list[str], index: int = 0, default: Path | None = None) -> Path | None:
     return Path(argv[index]) if len(argv) > index else default
+
+
+def check_nft(mode: str, dest: str) -> None:
+    if mode not in ("vps", "nat"):
+        die("gen-config.py: NFT_MODE must be vps or nat")
+    if mode == "nat" and not dest:
+        die("gen-config.py: NFT_MODE=nat needs NFT_DEST")
+    if dest and not dest.startswith("/"):
+        die("gen-config.py: NFT_DEST must be an absolute path")
 
 
 def fill_empty(cfg: dict[str, str], key: str, value: str) -> None:
@@ -230,8 +264,10 @@ def require_site_conf() -> None:
 
 def load_site() -> dict[str, str]:
     require_site_conf()
+    parsed = parse_site(SITE_CONF)
+    ipv6_set = bool(parsed.get("ENABLE_IPV6", "").strip())
     cfg = dict(DEFAULTS)
-    cfg.update(parse_site(SITE_CONF))
+    cfg.update(parsed)
     fill_empty(cfg, "REMOTE", hostname_f())
     if cfg["REMOTE"] == "example.com":
         die("gen-config.py: REMOTE=example.com is not allowed")
@@ -257,14 +293,20 @@ def load_site() -> dict[str, str]:
     cfg["NFT_MODE"] = cfg["NFT_MODE"].strip()
     cfg["NFT_DEST"] = cfg["NFT_DEST"].strip()
     fill_empty(cfg, "NFT_MODE", DEFAULTS["NFT_MODE"])
-    if cfg["NFT_MODE"] not in ("vps", "nat"):
-        die("gen-config.py: NFT_MODE must be vps or nat")
-    if cfg["NFT_MODE"] == "nat" and not cfg["NFT_DEST"]:
-        die("gen-config.py: NFT_MODE=nat needs NFT_DEST")
-    if cfg["NFT_DEST"] and not cfg["NFT_DEST"].startswith("/"):
-        die("gen-config.py: NFT_DEST must be an absolute path")
-    fill_empty(cfg, "ENABLE_IPV6", DEFAULTS["ENABLE_IPV6"])
-    if cfg["ENABLE_IPV6"] not in ("yes", "no"):
+    check_nft(cfg["NFT_MODE"], cfg["NFT_DEST"])
+    if not ipv6_set:
+        has_pool6 = any(
+            cfg[f"{proto.upper()}_POOL6"].strip() for proto in enabled_protos(cfg)
+        )
+        if wan_gua(cfg["WAN_IF"]) is None and not has_pool6:
+            cfg["ENABLE_IPV6"] = "no"
+            print(
+                f"gen-config.py: no global IPv6 on {cfg['WAN_IF']}; ENABLE_IPV6=no",
+                file=sys.stderr,
+            )
+        else:
+            cfg["ENABLE_IPV6"] = "yes"
+    elif cfg["ENABLE_IPV6"] not in ("yes", "no"):
         die("gen-config.py: ENABLE_IPV6 must be yes or no")
     if cfg["ENABLE_IPV6"] == "yes":
         protos = enabled_protos(cfg)
@@ -727,10 +769,271 @@ def cmd_client(argv: list[str]) -> None:
     write_out(data, dest, 0o600)
 
 
+CLOUD_INIT_RUNCMD = """bash -c 'set -euo pipefail
+test -e /dev/net/tun
+set -a
+. /etc/openvpn-deploy.env
+set +a
+: "${ARCHIVE_URL:?}"
+tmp=$(mktemp -d)
+cleanup() { rm -rf "$tmp"; }
+trap cleanup EXIT
+curl -fL --retry 3 -o "$tmp/src.tar.gz" "$ARCHIVE_URL"
+if [[ -n "${ARCHIVE_SHA256:-}" ]]; then
+  echo "$ARCHIVE_SHA256  $tmp/src.tar.gz" | sha256sum -c -
+fi
+mkdir "$tmp/tree"
+tar -xzf "$tmp/src.tar.gz" -C "$tmp/tree" --strip-components=1
+"$tmp/tree/vps/install.sh"'
+"""
+
+
+def yaml_mod():
+    try:
+        import yaml
+    except ImportError:
+        die("gen-config.py: cloud-init: install python3-yaml")
+    return yaml
+
+
+def yaml_dumper():
+    yaml = yaml_mod()
+
+    class LiteralDumper(yaml.SafeDumper):
+        pass
+
+    def represent_str(dumper, data: str):
+        if "\n" in data:
+            return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+        return yaml.representer.SafeRepresenter.represent_str(dumper, data)
+
+    LiteralDumper.add_representer(str, represent_str)
+    return LiteralDumper
+
+
+def yaml_scalar(value: object, key: str) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, int):
+        return str(value)
+    die(f"gen-config.py: vps.yaml: {key} must be a scalar")
+
+
+def load_vps(path: Path) -> tuple[dict[str, str], dict[str, object]]:
+    if not path.is_file():
+        die(f"gen-config.py: missing {path} (copy examples/vps.yaml)")
+    data = yaml_mod().safe_load(path.read_text())
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        die(f"gen-config.py: {path}: expected a mapping")
+    site: dict[str, str] = {}
+    launch: dict[str, object] = {}
+    for key, value in data.items():
+        if not isinstance(key, str) or (
+            key not in DEFAULTS and key not in LAUNCH_KEYS and key not in LOCAL_KEYS
+        ):
+            die(f"gen-config.py: {path}: unknown key {key}")
+        if key == "PROVISION":
+            text = "" if value is None else yaml_scalar(value, key)
+            if text not in ("", "pam", "google"):
+                die(f"gen-config.py: {path}: PROVISION must be pam or google")
+            continue
+        if key in LAUNCH_KEYS:
+            launch[key] = value
+        else:
+            site[key] = yaml_scalar(value, key)
+    return site, launch
+
+
+def launch_text(launch: dict[str, object], key: str, required: bool = False) -> str:
+    if key not in launch:
+        if required:
+            die(f"gen-config.py: vps.yaml: set {key}")
+        return ""
+    text = yaml_scalar(launch[key], key)
+    if required and not text:
+        die(f"gen-config.py: vps.yaml: set {key}")
+    return text
+
+
+def launch_staging(launch: dict[str, object]) -> bool:
+    if "ACME_STAGING" not in launch or launch["ACME_STAGING"] is None:
+        return False
+    text = yaml_scalar(launch["ACME_STAGING"], "ACME_STAGING")
+    if text not in ("", "yes", "no"):
+        die("gen-config.py: vps.yaml: ACME_STAGING must be yes or no")
+    return text == "yes"
+
+
+def ssh_pub_label(path: Path) -> str:
+    try:
+        rel = path.relative_to(Path.home())
+    except ValueError:
+        return str(path)
+    return "~/" + rel.as_posix()
+
+
+def default_ssh_key() -> tuple[str, Path]:
+    ssh_dir = Path.home() / ".ssh"
+    pubs = {path.name: path for path in ssh_dir.glob("*.pub")} if ssh_dir.is_dir() else {}
+    chosen = next((pubs[name] for name in SSH_PUB_PREFERENCE if name in pubs), None)
+    if chosen is None and pubs:
+        chosen = pubs[sorted(pubs)[0]]
+    if chosen is None:
+        die("gen-config.py: vps.yaml: set SSH_AUTHORIZED_KEYS (no ~/.ssh/*.pub)")
+    line = chosen.read_text().strip().splitlines()
+    if not line or not line[0].startswith(("ssh-", "ecdsa-")):
+        die(f"gen-config.py: {chosen} is not an SSH public key")
+    return line[0], chosen
+
+
+def launch_ssh_keys(launch: dict[str, object]) -> tuple[list[str], Path | None]:
+    if "SSH_AUTHORIZED_KEYS" not in launch or launch["SSH_AUTHORIZED_KEYS"] is None:
+        key, path = default_ssh_key()
+        return [key], path
+    value = launch["SSH_AUTHORIZED_KEYS"]
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        die("gen-config.py: vps.yaml: SSH_AUTHORIZED_KEYS entries must be strings")
+    keys: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            die("gen-config.py: vps.yaml: SSH_AUTHORIZED_KEYS entries must be strings")
+        keys.append(item.strip())
+    if keys:
+        return keys, None
+    key, path = default_ssh_key()
+    return [key], path
+
+
+def image_user(launch: dict[str, object]) -> str:
+    name = launch_text(launch, "IMAGE_USER") or login_name()
+    if name == "root" or not USER_NAME.match(name):
+        die(f"gen-config.py: IMAGE_USER={name!r} is not a user name")
+    return name
+
+
+def apply_vps_site_defaults(site: dict[str, str]) -> dict[str, str]:
+    out = dict(site)
+    if not out.get("NFT_MODE", "").strip():
+        out["NFT_MODE"] = "vps"
+    if "NFT_DEST" not in out and out["NFT_MODE"] == "vps":
+        out["NFT_DEST"] = VPS_NFT_DEST
+    check_nft(out["NFT_MODE"], out.get("NFT_DEST", ""))
+    return out
+
+
+def cmd_cloud_init(argv: list[str]) -> None:
+    expect_argv(argv, "cloud-init [OUT]", max_n=1)
+    dest = out_path(argv, default=Path("launch/cloud-init.yaml"))
+    site, launch = load_vps(VPS_YAML)
+    remote = site.get("REMOTE", "")
+    if not remote:
+        die("gen-config.py: vps.yaml: set REMOTE")
+    if remote == "example.com":
+        die("gen-config.py: REMOTE=example.com is not allowed")
+    archive = launch_text(launch, "ARCHIVE_URL", required=True)
+    deb = launch_text(launch, "BOOTSTASH_DEB_URL", required=True)
+    email = launch_text(launch, "ACME_EMAIL", required=True)
+    user = image_user(launch)
+    env = "\n".join(
+        [
+            f"ARCHIVE_URL={archive}",
+            f"ARCHIVE_SHA256={launch_text(launch, 'ARCHIVE_SHA256')}",
+            f"BOOTSTASH_DEB_URL={deb}",
+            f"BOOTSTASH_DEB_SHA256={launch_text(launch, 'BOOTSTASH_DEB_SHA256')}",
+            f"REMOTE={remote}",
+            f"ACME_EMAIL={email}",
+            f"IMAGE_USER={user}",
+        ]
+    )
+    if launch_staging(launch):
+        env += "\nACME_STAGING=yes"
+    env += "\n"
+    site = apply_vps_site_defaults(site)
+    site_text = "".join(f"{key} = {value}\n" for key, value in site.items())
+    ssh_keys, ssh_from = launch_ssh_keys(launch)
+    users: list[object] = ["default"]
+    if user not in ("debian", "ubuntu"):
+        users.append(
+            {
+                "name": user,
+                "groups": ["sudo", "adm"],
+                "shell": "/bin/bash",
+                "sudo": "ALL=(ALL) NOPASSWD:ALL",
+                "lock_passwd": False,
+                "ssh_authorized_keys": ssh_keys,
+            }
+        )
+    doc = {
+        "package_update": True,
+        "packages": [
+            "make",
+            "python3",
+            "easy-rsa",
+            "openvpn",
+            "nftables",
+            "curl",
+            "bind9-dnsutils",
+            "ca-certificates",
+            "ssl-cert",
+            "certbot",
+            "sudo",
+        ],
+        "users": users,
+        "write_files": [
+            {
+                "path": "/etc/openvpn-deploy.env",
+                "permissions": "0644",
+                "content": env,
+            },
+            {
+                "path": "/etc/openvpn-deploy.site.conf",
+                "permissions": "0644",
+                "content": site_text,
+            },
+        ],
+        "runcmd": [CLOUD_INIT_RUNCMD],
+    }
+    if user in ("debian", "ubuntu"):
+        doc["ssh_authorized_keys"] = ssh_keys
+    body = yaml_mod().dump(
+        doc,
+        Dumper=yaml_dumper(),
+        sort_keys=False,
+        default_flow_style=False,
+        width=4096,
+    )
+    if ssh_from is not None:
+        label = f"# ssh_authorized_keys from {ssh_pub_label(ssh_from)}\n"
+        lines = []
+        for line in body.splitlines(keepends=True):
+            stripped = line.lstrip(" ")
+            if stripped.startswith("ssh_authorized_keys:"):
+                indent = line[: len(line) - len(stripped)]
+                lines.append(indent + label)
+            lines.append(line)
+        body = "".join(lines)
+    write_out(
+        "#cloud-config\n"
+        "# Generated by gen-config.py cloud-init from vps.yaml. Do not edit.\n"
+        "# Do not put the Google client JSON in this file.\n"
+        + body,
+        dest,
+    )
+
+
 def usage() -> None:
     die(
         "usage: gen-config.py init-site\n"
         "       gen-config.py make-vars [OUT]\n"
+        "       gen-config.py cloud-init [OUT]\n"
         "       gen-config.py server udp|tcp [OUT]\n"
         "       gen-config.py nft [OUT]\n"
         "       gen-config.py nft-nat [OUT]\n"

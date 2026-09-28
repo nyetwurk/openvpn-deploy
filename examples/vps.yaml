@@ -11,6 +11,10 @@
 # NFT_DEST: /etc/nftables.d/50-openvpn.nft
 #   NFT_DEST: "" skips the copy. NFT_MODE: nat needs an explicit NFT_DEST.
 # ACME_STAGING: true   Let's Encrypt staging. Omitted means production.
+# DNS: the tunnel address (10.8.19.1, or the first host of UDP_POOL).
+#   The droplet runs bind there and pushes it, plus the tun IPv6
+#   when the WAN has a global address. Set DNS to push another
+#   resolver and skip bind.
 # PROVISION: pam
 #   Prompts for the image user's password. Not copied into user-data.
 # PROVISION: google   pipes the client JSON instead.

@@ -57,6 +57,8 @@ your login. `REMOTE=example.com` is rejected. Omitting `REMOTE` uses
 | `DUPLICATE_CN` | `yes` allows several live sessions with the same client cert (shared `.ovpn`) and omits pool persist. Default `no` |
 | `BOOTSTASH` | `auto` (default): after `make` / `make clients`, `sudo -n bootstash mkdir` for the current user, then `bootstash put`, if the CLI is present. `no` skips |
 
+An empty `DNS` in `site.conf` leaves the client on its own resolver; the throwaway droplet boot fills an omitted `DNS` with the tunnel address and runs bind there.
+
 > [!CAUTION]
 > A wrong `LAN_ROUTE` or `LAN_IF` can steal a client's home or office subnet so
 > those addresses go through the VPN instead of their LAN.

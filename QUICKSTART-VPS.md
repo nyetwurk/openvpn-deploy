@@ -3,6 +3,23 @@
 This guide is for a Debian VPS with no LAN. It is not for a NAT router
 that already masquerades a LAN.
 
+The throwaway boot builds a stock Debian image from `vps.yaml`. The
+PKI is created on that machine. The later sections are a hand install
+on a VPS you already have.
+
+## Throwaway boot
+
+Copy [`examples/vps.yaml`](examples/vps.yaml) to `vps.yaml` and fill it
+in. A launch script rebuilds `launch/cloud-init.yaml` and creates the
+machine.
+
+- `launch/create-vm-do.sh`, `launch/create-vm-gce.sh`, or `launch/create-vm-aws.sh` for a public VPS. `launch/create-vm-local.sh` boots a guest on this host and stops before a certificate.
+- Full tunnel, UDP only. Dual-stack when the WAN has a global IPv6; otherwise v4-only.
+- The client's resolver is bind on the tunnel address. The client's ISP does not see those queries. Authoritative servers see the VPS address. A client that ignores the push still queries its previous resolver, through the tunnel. Set `DNS` in `vps.yaml` to push a different resolver and skip bind.
+- Login is PAM at `https://REMOTE`: the image user, and a password the launch script asks for. `PROVISION: google` sends a client JSON instead. Profiles go in that user's cubby.
+
+Boot internals: [DEVELOPMENT.md](DEVELOPMENT.md).
+
 ## Install required packages
 
 ```sh

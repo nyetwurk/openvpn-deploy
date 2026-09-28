@@ -14,6 +14,8 @@ templates, `gen-config.py`, or the Makefile.
   `BOOTSTASH`, `NFT_MODE`, `NFT_DEST`. Does not `include`
   `site.conf`. `IPP_FILES` is empty when `DUPLICATE_CN=yes`
 
+What the throwaway boot provides is in
+[QUICKSTART-VPS.md](QUICKSTART-VPS.md#throwaway-boot).
 `make cloud-init` writes `launch/cloud-init.yaml` from `vps.yaml`.
 The launch scripts run that target first, unless a user-data file is
 passed.
@@ -34,7 +36,15 @@ user-data embeds a generated `site.conf` (site knobs only). The
 droplet then runs the same `make` / `sudo make deploy`. `make deploy`
 does not run `cloud-init`. Omitted `ENABLE_IPV6` follows the WAN:
 a global IPv6 selects `yes`, and none selects `no`. An explicit
-`yes` still requires a GUA or a pool. The boot
+`yes` still requires a GUA or a pool. Omitted `DNS` on that boot
+is the server address of the v4 pool (`10.8.19.1` unless `UDP_POOL`
+is set). `vps/provision.sh` installs bind there, recursive, answering
+only localhost and the VPN pool, and points `/etc/resolv.conf` at
+`127.0.0.1`. It masks `systemd-resolved` when that unit exists, and a
+oneshot puts the file back if DHCP or cloud-init replaces it. When
+the tun has a global IPv6, that address is pushed as a second
+nameserver and added to the listener. An explicit `DNS` in `vps.yaml`
+is pushed as written and skips bind. The boot
 log prints each step, including `DNS got` against `DNS want`.
 The image installs `ssl-cert` before the bootstash package.
 `bootstash.service` sets `SupplementaryGroups=ssl-cert`, and systemd

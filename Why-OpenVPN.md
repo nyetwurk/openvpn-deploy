@@ -2,7 +2,7 @@
 
 * A VPN on a host you control
 * UDP first; TCP 443 on that same host when UDP is blocked
-* Easy mobile client provisioning optional via [bootstash](https://github.com/nyetwurk/bootstash)
+* Easy mobile client provisioning optional via [bootstash](https://git.nyet.org/bootstash)
 
 ## Protocol
 

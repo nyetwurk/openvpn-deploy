@@ -87,7 +87,7 @@ contains sensitive keys. Avoid email unless it is encrypted.
 Import the profile in **OpenVPN Connect**. On mobile the action is
 sometimes labeled **Upload**; that means import.
 
-[bootstash](https://github.com/nyetwurk/bootstash) is optional (Google
+[bootstash](https://git.nyet.org/bootstash) is optional (Google
 OIDC + PAM in a browser). `BOOTSTASH=auto` runs
 `sudo -n bootstash mkdir` for the current user, then `bootstash put`,
 when the CLI is present. `bootstash mkdir` creates `users/<name>`. A missing

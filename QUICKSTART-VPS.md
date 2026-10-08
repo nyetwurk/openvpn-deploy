@@ -118,7 +118,7 @@ Enable `openvpn-server@server-tcp` only if `ENABLE_TCP=yes`.
 > units that share that directory or those unit names.
 
 `scp` `client/*.ovpn` off this VPS if you did not use local
-[bootstash](https://github.com/nyetwurk/bootstash). Profiles:
+[bootstash](https://git.nyet.org/bootstash). Profiles:
 [README.md#clients](README.md#clients).
 
 ## Optional fail2ban

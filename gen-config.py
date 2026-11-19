@@ -23,6 +23,7 @@ import json
 import os
 import pwd
 import re
+import shutil
 import string
 import subprocess
 import sys
@@ -1029,6 +1030,185 @@ def cmd_cloud_init(argv: list[str]) -> None:
     )
 
 
+def bootstash_config_too_old(stderr: str) -> bool:
+    """True when the CLI has no `config` command or no `--config` flag."""
+    lower = stderr.lower()
+    if "unknown command" in lower and "config" in lower:
+        return True
+    if "flag provided but not defined" in lower:
+        return True
+    if "unknown flag" in lower and "config" in lower:
+        return True
+    if "unrecognized option" in lower and "config" in lower:
+        return True
+    return False
+
+
+def bootstash_auth(
+    cli: str, conf: Path, dist: Path
+) -> tuple[tuple[str, list[str]] | None, str]:
+    """Merged PAM and ALLOWED_EMAILS. (None, stderr) when `bootstash config` fails.
+
+    Secrets are skipped: they cannot set these keys, and the client
+    JSON may be unreadable.
+    """
+    proc = subprocess.run(
+        [
+            cli,
+            "config",
+            "--defaults",
+            str(dist),
+            "--config",
+            str(conf),
+            "--secrets",
+            "/nonexistent/bootstash.no-secrets",
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    err = proc.stderr or ""
+    if proc.returncode != 0:
+        return None, err
+    pam, emails = "yes", []
+    for line in proc.stdout.splitlines():
+        key, sep, val = line.partition("=")
+        if not sep or not val:
+            continue
+        if key == "PAM":
+            pam = val
+        elif key == "ALLOWED_EMAILS":
+            emails.append(val)
+    return (pam, emails), err
+
+
+def echo_stderr(text: str) -> None:
+    if not text:
+        return
+    sys.stderr.write(text)
+    if not text.endswith("\n"):
+        sys.stderr.write("\n")
+
+
+def bootstash_cli(explicit: str) -> str:
+    if explicit:
+        return explicit
+    found = shutil.which("bootstash")
+    if found:
+        return found
+    for cand in ("/usr/sbin/bootstash", "/usr/local/sbin/bootstash"):
+        if os.access(cand, os.X_OK):
+            return cand
+    return ""
+
+
+def profile_stem(path: str) -> str:
+    return Path(path).name.removesuffix(".ovpn").removesuffix(".tcp")
+
+
+def run_bootstash(argv: list[str], strict: bool, what: str) -> None:
+    print(" ".join(argv))
+    try:
+        subprocess.run(argv, check=True)
+    except (OSError, subprocess.CalledProcessError):
+        if strict:
+            raise SystemExit(1)
+        print(f"bootstash {what} failed; profiles remain in client/")
+
+
+def publish_bootstash(
+    strict: bool,
+    cli_arg: str,
+    conf: Path,
+    dist: Path,
+    profiles: list[str],
+) -> None:
+    cli = bootstash_cli(cli_arg)
+    if not cli or not profiles:
+        if not strict:
+            return
+        print(
+            "bootstash CLI not found (PATH, /usr/sbin, /usr/local/sbin)"
+            if not cli
+            else "no client profiles"
+        )
+        raise SystemExit(1)
+    if os.geteuid() == 0:
+        print("generate PKI as non-root; run make, then sudo make deploy")
+        raise SystemExit(1)
+
+    auth, err = bootstash_auth(cli, conf, dist)
+    if auth is None:
+        echo_stderr(err)
+        if bootstash_config_too_old(err):
+            msg = "bootstash is too old (needs config --config); upgrade"
+        else:
+            msg = "bootstash config failed"
+        if strict:
+            print(msg)
+            raise SystemExit(1)
+        print(f"{msg}; profiles remain in client/")
+        return
+    pam, emails = auth
+    if pam == "no":
+        if not emails:
+            print("PAM=no and ALLOWED_EMAILS is empty: no address for put -email")
+            if strict:
+                raise SystemExit(1)
+            return
+        if len(emails) == 1:
+            run_bootstash([cli, "put", "-email", emails[0], *profiles], strict, "put")
+            return
+        by_name: dict[str, list[str]] = {}
+        for path in profiles:
+            by_name.setdefault(profile_stem(path).lower(), []).append(path)
+        placed: set[str] = set()
+        for email in emails:
+            local, sep, _domain = email.partition("@")
+            files = by_name.get(local) if sep and local else None
+            if not files:
+                print(f"no client/{local}.ovpn for {email}")
+                continue
+            placed.update(files)
+            run_bootstash([cli, "put", "-email", email, *files], strict, "put")
+        missed = [path for path in profiles if path not in placed]
+        for path in missed:
+            print(f"no ALLOWED_EMAILS local-part for {path}")
+        if missed and strict:
+            raise SystemExit(1)
+        return
+
+    user = pwd.getpwuid(os.getuid()).pw_name
+    run_bootstash(["sudo", "-n", cli, "mkdir", user], strict, "mkdir")
+    run_bootstash([cli, "put", *profiles], strict, "put")
+
+
+def cmd_bootstash(argv: list[str]) -> None:
+    flag = {
+        "--cli": "",
+        "--conf": "/etc/default/bootstash",
+        "--dist": "/usr/lib/bootstash/default-dist",
+    }
+    strict = False
+    profiles: list[str] = []
+    args = iter(argv)
+    for arg in args:
+        if arg == "--strict":
+            strict = True
+        elif arg in flag:
+            try:
+                flag[arg] = next(args)
+            except StopIteration:
+                die(f"usage: gen-config.py bootstash [{arg} VALUE]")
+        elif arg.startswith("-"):
+            die(f"gen-config.py: unknown argument {arg}")
+        else:
+            profiles.append(arg)
+    publish_bootstash(
+        strict, flag["--cli"], Path(flag["--conf"]), Path(flag["--dist"]), profiles
+    )
+
+
 def usage() -> None:
     die(
         "usage: gen-config.py init-site\n"
@@ -1037,7 +1217,8 @@ def usage() -> None:
         "       gen-config.py server udp|tcp [OUT]\n"
         "       gen-config.py nft [OUT]\n"
         "       gen-config.py nft-nat [OUT]\n"
-        "       gen-config.py client SERVER_CN [CLIENT [CONF [OUT]]]"
+        "       gen-config.py client SERVER_CN [CLIENT [CONF [OUT]]]\n"
+        "       gen-config.py bootstash [--strict] [--cli PATH] [--conf PATH] [--dist PATH] [PROFILE...]"
     )
 
 

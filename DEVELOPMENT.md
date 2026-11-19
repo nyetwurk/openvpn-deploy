@@ -65,7 +65,8 @@ local guest, and the DigitalOcean script share `launch/guest.sh`
 for the SSH login. A guest with no public address does not wait
 for a certificate.
 
-`DEST`, `EASYRSA`, `OPENVPN`, `CERT_DAYS`, and `BOOTSTASH_CLI` stay
+`DEST`, `EASYRSA`, `OPENVPN`, `CERT_DAYS`, `BOOTSTASH_CLI`,
+`BOOTSTASH_CONF`, and `BOOTSTASH_DIST` stay
 Makefile-only. `CLIENTS` and `BOOTSTASH` are site.conf options
 (emitted into `server/vars.mk`). Site knobs are not `make VAR=…`.
 
@@ -85,6 +86,7 @@ Make stops before PKI or confs.
 ./gen-config.py nft [OUT]
 ./gen-config.py nft-nat [OUT]
 ./gen-config.py client SERVER_CN [CLIENT [CONF [OUT]]]
+./gen-config.py bootstash [--strict] [--cli PATH] [--conf PATH] [--dist PATH] [PROFILE...]
 ```
 
 `SITE_CONF` overrides the site file path. Defaults live in
@@ -105,12 +107,22 @@ Explicit `yes` with no GUA and no pool dies. Explicit CIDR still
 wins. Unknown values die. The listener stays `proto udp` / `tcp`.
 `no` is v4-only (`block-ipv6`). Still NAT66, not a routed `/64`.
 `BOOTSTASH` is `auto` or `no` (empty becomes `auto`). After
-`clients`, `auto` runs `sudo -n bootstash mkdir` for the user
-running `make`, then `bootstash put`, when the CLI is on
-`PATH`, `/usr/sbin`, or `/usr/local/sbin`. Missing CLI, a refused
-sudo, a failed `mkdir`, or a failed put does not fail `make`. `BOOTSTASH_CLI` overrides
-the binary. `make bootstash` requires both commands to succeed. Do
-not parse `$DATA` here. `NFT_MODE` is `vps` or `nat` (empty becomes `vps`).
+`clients`, `auto` publishes when the CLI is on `PATH`,
+`/usr/sbin`, or `/usr/local/sbin`. `gen-config.py bootstash`
+reads merged `PAM` and `ALLOWED_EMAILS` from `bootstash config`
+(`--defaults` and `--config`). A CLI without `--config` is too old;
+the publish step says to upgrade. Do not parse those files or `$DATA`.
+`PAM=yes`: `sudo -n bootstash mkdir` for the user running `make`,
+then `bootstash put` of every profile. `PAM=no`: `put -email`
+(one address gets every profile; more than one uses the local-part
+as `client/<name>.ovpn` and `.tcp.ovpn`). An empty list does not
+put. An unmatched `CLIENTS` name stays in `client/`. Missing CLI,
+a refused sudo, or a failed `config`, `mkdir`, or `put` does not
+fail `make`. `BOOTSTASH_CLI`, `BOOTSTASH_CONF`, and `BOOTSTASH_DIST`
+override the binary and those two files. `make bootstash` requires
+the publish to succeed, including a local-part for every profile.
+
+`NFT_MODE` is `vps` or `nat` (empty becomes `vps`).
 `NFT_DEST` is empty or an absolute path. Empty `NFT_DEST` skips the
 nft copy. `NFT_MODE=nat` with an empty `NFT_DEST` dies. `vps`
 selects `server/openvpn.nft`. `nat` selects `server/openvpn-nat.nft`.

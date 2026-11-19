@@ -78,9 +78,8 @@ sudo systemctl enable --now nftables
 ## Build server confs, certificates, profiles, and OpenVPN nft fragment
 
 The next `make` builds server confs, certificates, profiles, and
-`server/openvpn.nft`. `BOOTSTASH=auto` (the default) also runs
-`sudo -n bootstash mkdir` for the current user, then `bootstash put`,
-when the CLI is on this host.
+`server/openvpn.nft`. `BOOTSTASH=auto` (the default) also publishes
+those profiles when the CLI is on this host.
 
 ```sh
 make

@@ -55,7 +55,7 @@ your login. `REMOTE=example.com` is rejected. Omitting `REMOTE` uses
 | `NFT_DEST` | Absolute path to copy that fragment to (`0755`). Empty skips the copy. Does not `nft -f`. `make dryrun` diffs this path against the fragment |
 | `CLIENTS` | Who gets a profile. Space-separated names. Defaults to your login |
 | `DUPLICATE_CN` | `yes` allows several live sessions with the same client cert (shared `.ovpn`) and omits pool persist. Default `no` |
-| `BOOTSTASH` | `auto` (default): after `make` / `make clients`, `sudo -n bootstash mkdir` for the current user, then `bootstash put`, if the CLI is present. `no` skips |
+| `BOOTSTASH` | `auto` (default) publishes after `make` when the CLI is present (`mkdir` and `put` for `PAM=yes`, `put -email` for `PAM=no`). `no` skips |
 
 An empty `DNS` in `site.conf` leaves the client on its own resolver; the throwaway droplet boot fills an omitted `DNS` with the tunnel address and runs bind there.
 
@@ -88,11 +88,14 @@ Import the profile in **OpenVPN Connect**. On mobile the action is
 sometimes labeled **Upload**; that means import.
 
 [bootstash](https://git.nyet.org/bootstash) is optional (Google
-OIDC + PAM in a browser). `BOOTSTASH=auto` runs
-`sudo -n bootstash mkdir` for the current user, then `bootstash put`,
-when the CLI is present. `bootstash mkdir` creates `users/<name>`. A missing
-command, a refused sudo, or a failed `mkdir` leaves the profiles in
-`client/`. `scp` if
+OIDC + PAM in a browser). `BOOTSTASH=auto` publishes when the CLI
+is present. `PAM=yes` runs `bootstash mkdir` (`users/<name>`) then
+`bootstash put` of every profile. `PAM=no` runs `bootstash put -email`:
+one `ALLOWED_EMAILS` address gets every profile; more than one uses
+the name before `@` (`client/bob.ovpn`, and `client/bob.tcp.ovpn`
+when TCP is on). An unmatched name, an empty allowlist, a missing
+CLI, a refused sudo, a CLI without `config --config` (upgrade),
+or a failed command leaves the profiles in `client/`. `scp` if
 the cubby is elsewhere. The phone must reach that host *before* the
 tunnel is up. This Makefile does not install the package. `PORT_SHARE` and
 `TCP_LISTEN` are not a profile server.
@@ -184,8 +187,8 @@ Run `make` as a normal user, then `sudo make deploy`.
 
 - `make` — server configs, certificates, and profiles for `CLIENTS`
 - `make clients` — `client/name.ovpn` and/or `client/name.tcp.ovpn`
-  (both also `bootstash mkdir` and `bootstash put` when `BOOTSTASH=auto` and the CLI is present)
-- `make bootstash` — `bootstash mkdir` then `bootstash put` (fails if the CLI is missing or either command fails)
+  (both also publish into bootstash when `BOOTSTASH=auto` and the CLI is present)
+- `make bootstash` — publish into bootstash (fails if the CLI is missing, a profile has no matching address, or `put` fails)
 - `sudo make deploy` — install configs and certificates, create
   address-assignment files, restart the enabled units. Copies the
   nft fragment to `NFT_DEST` when that path is set (does not
